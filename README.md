@@ -11,15 +11,33 @@ Versión web del `presupuesto.xlsx`: solo HTML, CSS y JS, con datos en Supabase.
 | ✅ Sí / ❌ No | Círculo para marcar como pagado con un toque |
 | Total gastos / Total pagado / Balance restante | Se calculan en vivo, junto con *Pendiente* y *Si pagas todo* |
 | Columna "Monto debt" con fórmulas `*1.02 - C7` | Pestaña **Deudas**: saldo = saldo inicial + cargos − abonos pagados. Botón **+ Interés %**, límite de crédito con disponible, y meta (p. ej. "reducir a 1000") |
-| — | **Historial** con el resumen de cada quincena |
+| — | **Reportes**: gráficas de ingresos vs. gastos pagados, saldo total de deudas y gastos por categoría, más el historial de cada quincena |
 | — | Modo oscuro (botón ☀️/🌙, se recuerda en el dispositivo) |
 
-Un gasto vinculado a una deuda (campo *Abono a deuda*) reduce el saldo de esa deuda solo cuando está marcado como pagado.
+Un gasto vinculado a una deuda (campo *Abono a deuda / aporte a meta*) reduce el saldo de esa deuda solo cuando está marcado como pagado. Si lo vinculas a una meta, suma a tu ahorro.
+
+### Gastos
+- **Categoría** (se sugiere sola según la descripción) y **fecha de vencimiento**: arriba de la quincena aparecen avisos de lo vencido o lo que vence en ≤ 3 días.
+- **Fijo** 📌: al crear una quincena puedes copiar *solo los fijos*, *todos* o *ninguno*. Los vencimientos se corren a la nueva fecha.
+- **Ingresos extra** (bonos, ventas) por quincena; se suman al salario en el balance.
+- En *Reportes*, el botón 🪄 asigna categoría a los gastos viejos que no tienen.
+
+### Deudas
+- **Día de corte, día de pago y pago mínimo**, con aviso cuando el pago está a ≤ 5 días.
+- **Uso del crédito** (saldo ÷ límite) por tarjeta y en total, con marca en 30 %.
+- **Plan para salir de deudas**: con lo que pagas por quincena compara *avalancha* (primero la de mayor interés) y *bola de nieve* (primero la de menor saldo): cuántas quincenas tardas, cuánto interés pagas, en qué orden se liquidan y una gráfica del saldo proyectado. El interés puede ser mensual o quincenal.
+
+### Ahorro
+- **Metas** con objetivo y fecha opcional: muestra el avance y cuánto apartar por quincena para llegar. Aportes y retiros manuales con *± Aporte / retiro*.
+
+### App instalable y sin conexión
+- Se instala como app (ícono propio, pantalla completa). En Chrome/Edge aparece el botón ⬇️ arriba.
+- **Funciona sin internet**: los datos se guardan en el dispositivo y los cambios que hagas sin conexión se envían solos cuando vuelve la red (arriba se ve *"Sin conexión · N sin guardar"*).
 
 ## Configuración (una vez)
 
 1. Crea un proyecto en [supabase.com](https://supabase.com).
-2. **SQL Editor → New query**: pega el contenido de `schema.sql` y ejecútalo. Se puede volver a ejecutar sin problema, y también actualiza la versión anterior que tenía login.
+2. **SQL Editor → New query**: pega el contenido de `schema.sql` y ejecútalo. Se puede volver a ejecutar sin problema y actualiza las versiones anteriores sin perder datos (si la app dice *"Actualiza la base de datos"*, es esto).
 3. **Project Settings → API**: copia la *Project URL* y la clave pública (*anon* / *publishable*) en `config.js`.
 4. (Opcional) Importar los datos del Excel: ejecuta `seed.sql` en el SQL Editor **una sola vez**, porque si lo repites se duplican los datos.
 5. Abre `index.html`.
@@ -30,7 +48,9 @@ Un gasto vinculado a una deuda (campo *Abono a deuda*) reduce el saldo de esa de
 
 Publícala en un hosting estático, por ejemplo GitHub Pages (sube la carpeta a un repo y activa *Settings → Pages*). En el celular: menú del navegador → **Agregar a pantalla de inicio**.
 
-Para probar en tu PC sin publicar, basta con abrir `index.html` con doble clic.
+Para probar en tu PC sin publicar, basta con abrir `index.html` con doble clic (así no se instala ni funciona sin conexión: eso requiere `https`, que GitHub Pages ya da).
+
+Al publicar una versión nueva, sube el número de `CACHE` en `sw.js` (p. ej. `presupuesto-v3`) para que los celulares descarguen los archivos nuevos.
 
 ## Archivos
 
@@ -38,5 +58,6 @@ Para probar en tu PC sin publicar, basta con abrir `index.html` con doble clic.
 - `styles.css`: diseño responsive y los temas claro/oscuro
 - `app.js`: lógica, cálculos y conexión con Supabase
 - `config.js`: credenciales de Supabase
+- `manifest.webmanifest`, `sw.js`, `icons/`: app instalable y modo sin conexión
 - `schema.sql`: tablas y políticas de seguridad
 - `seed.sql`: datos importados de `presupuesto.xlsx`

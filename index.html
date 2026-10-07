@@ -5,7 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Presupuesto">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Presupuesto Quincenal</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <script>
     // Aplica el tema antes de pintar para evitar parpadeo
     (function () {
@@ -20,6 +27,8 @@
 <body>
   <header class="topbar">
     <h1 class="brand">💰 Presupuesto</h1>
+    <span id="syncState" class="sync hidden" role="status" aria-live="polite"></span>
+    <button id="installBtn" class="icon-btn hidden" type="button" aria-label="Instalar app" title="Instalar app">⬇️</button>
     <button id="themeToggle" class="icon-btn" type="button" aria-label="Cambiar tema" title="Modo oscuro">
       <span class="sun">☀️</span><span class="moon">🌙</span>
     </button>
@@ -49,6 +58,8 @@
       </div>
 
       <div id="periodContent" class="hidden">
+        <div id="alerts" class="alerts hidden"></div>
+
         <div class="card hero">
           <div class="hero-row">
             <span class="label">Balance restante</span>
@@ -66,9 +77,11 @@
             <span class="label">Salario</span>
             <input id="salaryInput" type="text" inputmode="decimal" autocomplete="off" aria-label="Salario quincenal">
           </label>
+          <div class="stat"><span class="label">Ingresos extra</span><strong id="totalExtra">$0.00</strong></div>
           <div class="stat"><span class="label">Total gastos</span><strong id="totalGastos">$0.00</strong></div>
           <div class="stat"><span class="label">Pagado</span><strong id="totalPagado" class="pos">$0.00</strong></div>
           <div class="stat"><span class="label">Pendiente</span><strong id="totalPendiente" class="warn">$0.00</strong></div>
+          <div class="stat"><span class="label">Ahorrado</span><strong id="totalAhorro">$0.00</strong></div>
         </div>
 
         <div class="list-head">
@@ -77,6 +90,13 @@
         </div>
         <ul id="gastoList" class="list"></ul>
         <p id="noGastos" class="muted center hidden">Sin gastos. Toca <b>+</b> para agregar.</p>
+
+        <div class="list-head section-gap">
+          <h2>Ingresos extra</h2>
+          <button id="addIngresoBtn" class="chip" type="button">+ Agregar</button>
+        </div>
+        <ul id="ingresoList" class="list"></ul>
+        <p id="noIngresos" class="muted small">Bonos, ventas u otros ingresos de esta quincena.</p>
       </div>
     </section>
 
@@ -86,14 +106,64 @@
         <h2>Deudas</h2>
         <span id="deudaTotal" class="muted"></span>
       </div>
+      <div id="deudaSummary" class="stats"></div>
       <div id="deudaList"></div>
       <p id="noDeudas" class="muted center hidden">No tienes deudas registradas. Toca <b>+</b> para agregar una.</p>
+
+      <div id="simCard" class="card sim hidden">
+        <h2>🧮 Plan para salir de deudas</h2>
+        <label>Pago total a deudas por quincena
+          <input id="simPago" type="text" inputmode="decimal" autocomplete="off">
+        </label>
+        <p id="simHint" class="muted small"></p>
+        <div id="simResults"></div>
+      </div>
     </section>
 
-    <!-- Historial -->
-    <section id="tab-historial" class="tab hidden">
-      <div class="list-head"><h2>Historial</h2></div>
+    <!-- Ahorro -->
+    <section id="tab-ahorro" class="tab hidden">
+      <div class="list-head">
+        <h2>Metas de ahorro</h2>
+        <span id="metaTotal" class="muted"></span>
+      </div>
+      <div id="metaList"></div>
+      <div id="noMetas" class="card empty hidden">
+        <p>Crea una meta, como un <b>fondo de emergencia</b>.<br>
+        <span class="muted small">Para aportar, agrega un gasto en la quincena y vincúlalo a la meta; cuenta cuando lo marcas como pagado.</span></p>
+        <button class="btn primary" type="button" data-action="new-meta">Crear meta</button>
+      </div>
+    </section>
+
+    <!-- Reportes -->
+    <section id="tab-reportes" class="tab hidden">
+      <div class="list-head">
+        <h2>Reportes</h2>
+        <div class="seg" id="rangeSeg" role="group" aria-label="Rango">
+          <button type="button" data-range="6">6 quinc.</button>
+          <button type="button" data-range="12">12 quinc.</button>
+          <button type="button" data-range="0">Todo</button>
+        </div>
+      </div>
       <div id="historyTotals" class="stats three"></div>
+
+      <div class="card chart-card">
+        <h3>Ingresos vs. gastos pagados</h3>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>Ingresos</span><span><i style="background:var(--series-2)"></i>Gastos pagados</span></div>
+        <div id="chartFlujo" class="chart"></div>
+      </div>
+
+      <div class="card chart-card">
+        <h3>Saldo total de deudas</h3>
+        <div id="chartDeuda" class="chart"></div>
+      </div>
+
+      <div class="card chart-card">
+        <h3>Gastos por categoría</h3>
+        <div id="chartCats"></div>
+        <button id="autoCatBtn" class="btn sm hidden" type="button"></button>
+      </div>
+
+      <div class="list-head"><h2>Historial</h2></div>
       <ul id="historyList" class="list"></ul>
     </section>
 
@@ -103,19 +173,41 @@
   <nav id="bottomNav" class="bottom-nav hidden">
     <button type="button" data-tab="periodo" class="active"><span>🗓️</span>Quincena</button>
     <button type="button" data-tab="deudas"><span>💳</span>Deudas</button>
-    <button type="button" data-tab="historial"><span>📊</span>Historial</button>
+    <button type="button" data-tab="ahorro"><span>🐷</span>Ahorro</button>
+    <button type="button" data-tab="reportes"><span>📊</span>Reportes</button>
   </nav>
+
+  <div id="tooltip" class="tooltip hidden" role="tooltip"></div>
 
   <!-- ===== Diálogos ===== -->
   <dialog id="gastoDialog" class="sheet">
     <form method="dialog" id="gastoForm">
       <h3 id="gastoTitle">Nuevo gasto</h3>
       <label>Descripción<input name="descripcion" required maxlength="80" autocomplete="off"></label>
-      <label>Monto<input name="monto" type="text" inputmode="decimal" placeholder="0.00 (acepta 50+20)" autocomplete="off"></label>
-      <label>Abono a deuda<select name="deuda_id"><option value="">— Ninguna —</option></select></label>
+      <div class="grid2">
+        <label>Monto<input name="monto" type="text" inputmode="decimal" placeholder="0.00 (acepta 50+20)" autocomplete="off"></label>
+        <label>Vence (opcional)<input name="vence" type="date"></label>
+      </div>
+      <label>Categoría<select name="categoria"></select></label>
+      <label>Abono a deuda / aporte a meta<select name="vinculo"></select></label>
+      <label class="check"><input type="checkbox" name="fijo"> Fijo (se copia a cada quincena nueva)</label>
       <label class="check"><input type="checkbox" name="pagado"> Pagado</label>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="gastoDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="ingresoDialog" class="sheet">
+    <form method="dialog" id="ingresoForm">
+      <h3 id="ingresoTitle">Ingreso extra</h3>
+      <label>Descripción<input name="descripcion" required maxlength="80" autocomplete="off" placeholder="Bono, venta…"></label>
+      <label>Monto<input name="monto" type="text" inputmode="decimal" required autocomplete="off"></label>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="ingresoDelete">Eliminar</button>
         <span class="spacer"></span>
         <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
         <button value="ok" class="btn primary">Guardar</button>
@@ -129,7 +221,13 @@
       <label>Nombre<input name="nombre" required maxlength="40" placeholder="15 de Octubre"></label>
       <label>Fecha<input name="fecha" type="date" required></label>
       <label>Salario<input name="salario" type="text" inputmode="decimal" autocomplete="off" placeholder="505"></label>
-      <label class="check copy-row"><input type="checkbox" name="copiar" checked> Copiar gastos de la quincena actual (sin marcar como pagados)</label>
+      <label class="copy-row">Copiar gastos de la quincena actual (sin marcar como pagados)
+        <select name="copiar">
+          <option value="fijos">Solo los fijos</option>
+          <option value="todos">Todos</option>
+          <option value="ninguno">Ninguno</option>
+        </select>
+      </label>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="periodDelete">Eliminar</button>
         <span class="spacer"></span>
@@ -148,10 +246,36 @@
         <label>Límite (opcional)<input name="limite" type="text" inputmode="decimal" autocomplete="off"></label>
         <label>Meta (opcional)<input name="meta" type="text" inputmode="decimal" autocomplete="off" placeholder="1000"></label>
       </div>
-      <label>Interés % (por aplicación)<input name="interes_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="2"></label>
+      <div class="grid2">
+        <label>Interés %<input name="interes_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="2"></label>
+        <label>Se cobra<select name="interes_frec"><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option></select></label>
+      </div>
+      <div class="grid3">
+        <label>Día de corte<input name="dia_corte" type="number" min="1" max="31" inputmode="numeric" placeholder="—"></label>
+        <label>Día de pago<input name="dia_pago" type="number" min="1" max="31" inputmode="numeric" placeholder="—"></label>
+        <label>Pago mínimo<input name="pago_minimo" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
+      </div>
       <p class="muted small" id="deudaEditHint">Al editar, el saldo es el inicial; los abonos y cargos se suman/restan automáticamente.</p>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="deudaDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="metaDialog" class="sheet">
+    <form method="dialog" id="metaForm">
+      <h3 id="metaTitle">Nueva meta</h3>
+      <label>Nombre<input name="nombre" required maxlength="40" placeholder="Fondo de emergencia"></label>
+      <div class="grid2">
+        <label>Objetivo<input name="objetivo" type="text" inputmode="decimal" required autocomplete="off" placeholder="2000"></label>
+        <label>Ya tengo<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+      </div>
+      <label>Lograrla para (opcional)<input name="fecha_meta" type="date"></label>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="metaDelete">Eliminar</button>
         <span class="spacer"></span>
         <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
         <button value="ok" class="btn primary">Guardar</button>
