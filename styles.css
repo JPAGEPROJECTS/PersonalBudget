@@ -365,3 +365,10 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
   background: color-mix(in srgb, var(--primary) 9%, var(--surface));
   border-color: color-mix(in srgb, var(--primary) 30%, transparent);
 }
+
+/* ---------- Préstamos y fondo de emergencia ---------- */
+.head-right { display: inline-flex; align-items: center; gap: 10px; }
+.fondo { display: grid; gap: 8px; margin-bottom: 12px; }
+.fondo p { margin: 0; }
+.fondo-head { display: flex; align-items: center; gap: 8px; }
+.fondo-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

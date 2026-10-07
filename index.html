@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -110,6 +110,13 @@
       <div id="deudaList"></div>
       <p id="noDeudas" class="muted center hidden">No tienes deudas registradas. Toca <b>+</b> para agregar una.</p>
 
+      <div class="list-head section-gap">
+        <h2>Te deben</h2>
+        <span class="head-right"><span id="prestamoTotal" class="muted"></span><button id="addPrestamoBtn" class="chip" type="button">+ Agregar</button></span>
+      </div>
+      <div id="prestamoList"></div>
+      <p id="noPrestamos" class="muted small">Dinero que prestaste. Puedes vincular un gasto ("le presté") o un ingreso extra ("me devolvió").</p>
+
       <div id="simCard" class="card sim hidden">
         <h2>🧮 Plan para salir de deudas</h2>
         <label>Pago total a deudas por quincena
@@ -126,6 +133,7 @@
         <h2>Metas de ahorro</h2>
         <span id="metaTotal" class="muted"></span>
       </div>
+      <div id="fondoCard" class="card fondo hidden"></div>
       <div id="metaList"></div>
       <div id="noMetas" class="card empty hidden">
         <p>Crea una meta, como un <b>fondo de emergencia</b>.<br>
@@ -194,8 +202,14 @@
         <label>Vence (opcional)<input name="vence" type="date"></label>
       </div>
       <label>Categoría<select name="categoria"></select></label>
-      <label>Abono a deuda / aporte a meta<select name="vinculo"></select></label>
-      <label class="check"><input type="checkbox" name="fijo"> Fijo (se copia a cada quincena nueva)</label>
+      <label>Vincular a (deuda, meta o préstamo)<select name="vinculo"></select></label>
+      <label>Repetir en quincenas nuevas
+        <select name="repetir">
+          <option value="no">No (solo esta quincena)</option>
+          <option value="quincenal">📌 Cada quincena</option>
+          <option value="mensual">📅 Cada mes, en esta misma quincena</option>
+        </select>
+      </label>
       <label class="check"><input type="checkbox" name="pagado"> Pagado</label>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="gastoDelete">Eliminar</button>
@@ -211,6 +225,7 @@
       <h3 id="ingresoTitle">Ingreso extra</h3>
       <label>Descripción<input name="descripcion" required maxlength="80" autocomplete="off" placeholder="Bono, venta…"></label>
       <label>Monto<input name="monto" type="text" inputmode="decimal" required autocomplete="off"></label>
+      <label>¿Es una devolución de un préstamo?<select name="prestamo_id"></select></label>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="ingresoDelete">Eliminar</button>
         <span class="spacer"></span>
@@ -293,6 +308,22 @@
     </form>
   </dialog>
 
+  <dialog id="prestamoDialog" class="sheet">
+    <form method="dialog" id="prestamoForm">
+      <h3 id="prestamoTitle">Nuevo préstamo</h3>
+      <label>Persona<input name="nombre" required maxlength="40" autocomplete="off" placeholder="Kevin"></label>
+      <label>Te debe ahora<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+      <label>Nota (opcional)<input name="nota" maxlength="80" placeholder="Para el pasaje…"></label>
+      <p class="muted small" id="prestamoEditHint">Al editar, es el monto inicial; lo prestado y lo devuelto se suman/restan solos.</p>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="prestamoDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="cargoDialog" class="sheet">
     <form method="dialog" id="cargoForm">
       <h3 id="cargoTitle">Agregar cargo</h3>
@@ -316,7 +347,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="config.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

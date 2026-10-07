@@ -115,9 +115,9 @@
 
   // ---------- Estado ----------
   // Nombre de tabla -> clave en S
-  const TABLES = { periodos: "periodos", gastos: "gastos", deudas: "deudas", deuda_cargos: "cargos", ingresos: "ingresos", metas: "metas", meta_movs: "metaMovs" };
+  const TABLES = { periodos: "periodos", gastos: "gastos", deudas: "deudas", deuda_cargos: "cargos", ingresos: "ingresos", metas: "metas", meta_movs: "metaMovs", prestamos: "prestamos", prestamo_movs: "prestamoMovs" };
   const S = {
-    periodos: [], gastos: [], deudas: [], cargos: [], ingresos: [], metas: [], metaMovs: [],
+    periodos: [], gastos: [], deudas: [], cargos: [], ingresos: [], metas: [], metaMovs: [], prestamos: [], prestamoMovs: [],
     currentId: store.get("periodo"),
     tab: "periodo",
     hidePaid: store.get("hidePaid") === "1",
@@ -147,6 +147,13 @@
     const cargos = sum(S.cargos.filter((c) => c.deuda_id === d.id), (c) => c.monto);
     const abonos = sum(S.gastos.filter((g) => g.deuda_id === d.id && g.pagado), (g) => g.monto);
     return round2(+d.saldo_inicial + cargos - abonos);
+  }
+  // Lo que te debe una persona: inicial + movimientos + gastos pagados vinculados − devoluciones (ingresos)
+  function saldoPrestamo(pr) {
+    const movs = sum(S.prestamoMovs.filter((x) => x.prestamo_id === pr.id), (x) => x.monto);
+    const prestado = sum(S.gastos.filter((g) => g.prestamo_id === pr.id && g.pagado), (g) => g.monto);
+    const devuelto = sum(S.ingresos.filter((i) => i.prestamo_id === pr.id), (i) => i.monto);
+    return round2(+pr.saldo_inicial + movs + prestado - devuelto);
   }
   function saldoMeta(m) {
     const movs = sum(S.metaMovs.filter((x) => x.meta_id === m.id), (x) => x.monto);
@@ -269,7 +276,7 @@
 
   function needsMigration() {
     showSetup("Actualiza la base de datos",
-      "Esta versión agrega categorías, vencimientos, ingresos extra, metas de ahorro y datos de tarjetas. " +
+      "Esta versión agrega funciones nuevas (metas, préstamos, gastos mensuales…) que necesitan columnas y tablas nuevas. " +
       "En Supabase abre <b>SQL Editor</b>, pega el contenido de <b>schema.sql</b> y ejecútalo; luego recarga esta página. " +
       "Tus datos se conservan.");
   }
@@ -282,18 +289,20 @@
       return req;
     };
     // Verifica que el esquema esté actualizado
-    const probe = await sb.from("gastos").select("id,vence,categoria,fijo,meta_id").limit(1);
+    const probe = await sb.from("gastos").select("id,vence,categoria,fijo,meta_id,frecuencia,prestamo_id").limit(1);
     if (probe.error) return { error: probe.error, status: probe.status };
     const results = await Promise.all([
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
       get("ingresos"), get("metas", "created_at"), get("meta_movs", "created_at"),
+      get("prestamos", "created_at"), get("prestamo_movs", "created_at"),
       sb.from("deudas").select("id,dia_pago,interes_frec").limit(1),
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
+      sb.from("ingresos").select("id,prestamo_id").limit(1),
     ]);
     const bad = results.find((r) => r.error);
     if (bad) return { error: bad.error, status: bad.status };
-    const [periodos, gastos, deudas, cargos, ingresos, metas, metaMovs] = results.map((r) => r.data);
-    return { data: { periodos, gastos, deudas, cargos, ingresos, metas, metaMovs } };
+    const [periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs] = results.map((r) => r.data);
+    return { data: { periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs } };
   }
 
   let hasData = false;
@@ -418,12 +427,14 @@
       const v = venceInfo(g);
       const deuda = g.deuda_id && byId("deudas", g.deuda_id);
       const meta = g.meta_id && byId("metas", g.meta_id);
+      const prest = g.prestamo_id && byId("prestamos", g.prestamo_id);
       const bits = [
         g.pagado ? "Pagado" : "Pendiente",
         v && `<span class="${v.cls}">${v.txt}</span>`,
-        g.fijo && `<span title="Fijo">📌 fijo</span>`,
+        g.fijo && (g.frecuencia === "mensual" ? `<span title="Se repite cada mes">📅 mensual</span>` : `<span title="Se repite cada quincena">📌 fijo</span>`),
         deuda && `<span class="badge">Abono ${esc(deuda.nombre)}</span>`,
         meta && `<span class="badge">Ahorro ${esc(meta.nombre)}</span>`,
+        prest && `<span class="badge">Préstamo a ${esc(prest.nombre)}</span>`,
       ].filter(Boolean);
       return `
       <li class="item ${g.pagado ? "paid" : ""}" data-id="${g.id}">
@@ -442,7 +453,7 @@
     const ings = ingresosDe(p.id);
     $("#ingresoList").innerHTML = ings.map((i) => `
       <li class="item slim" data-id="${i.id}">
-        <div class="body"><div class="desc">${esc(i.descripcion)}</div></div>
+        <div class="body"><div class="desc">${esc(i.descripcion)}</div>${i.prestamo_id && byId("prestamos", i.prestamo_id) ? `<div class="meta"><span class="badge">Devolución de ${esc(byId("prestamos", i.prestamo_id).nombre)}</span></div>` : ""}</div>
         <span class="amt pos">+${fmt(+i.monto)}</span>
       </li>`).join("");
     $("#noIngresos").classList.toggle("hidden", ings.length > 0);
@@ -507,8 +518,44 @@
         </div></details>` : ""}
       </div>`;
     }).join("");
+    renderPrestamos();
     renderSim();
   }
+
+  // ---------- Te deben (préstamos) ----------
+  function renderPrestamos() {
+    const ps = S.prestamos;
+    const total = sum(ps, saldoPrestamo);
+    $("#prestamoTotal").textContent = ps.length ? "Total: " + fmt(total) : "";
+    $("#noPrestamos").classList.toggle("hidden", ps.length > 0);
+    const pName = (id) => byId("periodos", id)?.nombre ?? "";
+    const pFecha = (id, alt) => byId("periodos", id)?.fecha ?? alt;
+    $("#prestamoList").innerHTML = ps.map((pr) => {
+      const saldo = saldoPrestamo(pr);
+      const movs = [
+        ...S.prestamoMovs.filter((x) => x.prestamo_id === pr.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Me devolvió" : "Le presté"), m: +x.monto, movId: x.id })),
+        ...S.gastos.filter((g) => g.prestamo_id === pr.id && g.pagado).map((g) => ({ t: pFecha(g.periodo_id, g.created_at), label: "Le presté · " + pName(g.periodo_id), m: +g.monto })),
+        ...S.ingresos.filter((i) => i.prestamo_id === pr.id).map((i) => ({ t: pFecha(i.periodo_id, i.created_at), label: "Me devolvió · " + pName(i.periodo_id), m: -i.monto })),
+      ].sort((a, b) => String(b.t).localeCompare(String(a.t)));
+      return `
+      <div class="card deuda prestamo" data-id="${pr.id}">
+        <div class="deuda-top">
+          <h2>${esc(pr.nombre)}</h2>
+          <span class="deuda-saldo ${saldo <= 0 ? "pos" : ""}">${saldo <= 0 ? "Al día ✓" : fmt(saldo)}</span>
+        </div>
+        ${pr.nota ? `<div class="deuda-meta"><span>${esc(pr.nota)}</span></div>` : ""}
+        <div class="deuda-actions">
+          <button class="btn sm" type="button" data-act="presto">+ Le presté</button>
+          <button class="btn sm" type="button" data-act="devolvio">✓ Me devolvió</button>
+          <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
+        </div>
+        ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
+          ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="mov-amt"><span class="${x.m < 0 ? "pos" : ""}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span>${x.movId ? `<button class="mov-del" type="button" data-act="del-mov" data-mov="${x.movId}" title="Eliminar movimiento" aria-label="Eliminar movimiento">✕</button>` : ""}</span></div>`).join("")}
+        </div></details>` : ""}
+      </div>`;
+    }).join("");
+  }
+
   const usoCls = (u) => (u == null ? "" : u > 50 ? "neg" : u > 30 ? "warn" : "pos");
 
   // ---------- Simulador de deudas ----------
@@ -650,8 +697,63 @@
     return { ok: saldo >= obj - 0.005, quincenas: k, serie };
   }
 
+  // Gasto mensual base para el fondo de emergencia: los fijos de la última quincena
+  // del 15 y la del 30 (un mes); si no hay fijos, el promedio de tus gastos.
+  // No cuenta aportes a metas ni préstamos.
+  function gastoMensualBase() {
+    const ps = [...S.periodos].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    if (!ps.length) return null;
+    const util = (g) => !g.meta_id && !g.prestamo_id && +g.monto > 0;
+    const mes = [1, 2].map((h) => ps.find((p) => mitad(p.fecha) === h)).filter(Boolean);
+    const fijos = mes.flatMap((p) => gastosDe(p.id).filter((g) => g.fijo && util(g)));
+    if (fijos.length) {
+      let t = sum(fijos, (g) => g.monto);
+      if (mes.length === 1) t += sum(fijos.filter((g) => g.frecuencia !== "mensual"), (g) => g.monto);
+      return { monto: round2(t), fuente: "fijos" };
+    }
+    const ult = ps.slice(0, 6);
+    return { monto: round2((sum(ult, (p) => sum(gastosDe(p.id).filter(util), (g) => g.monto)) / ult.length) * 2), fuente: "promedio" };
+  }
+  const fondoMeta = () => S.metas.find((m) => /emergencia/i.test(m.nombre));
+
+  function renderFondo() {
+    const card = $("#fondoCard");
+    const base = gastoMensualBase();
+    card.classList.toggle("hidden", !base?.monto);
+    if (!base?.monto) return;
+    const fm = fondoMeta();
+    const opc = [3, 6].map((n) => ({ n, monto: round2(base.monto * n) }));
+    const cubre = fm ? saldoMeta(fm) / base.monto : null;
+    card.innerHTML = `
+      <div class="fondo-head"><span aria-hidden="true">🛟</span><h2>Fondo de emergencia sugerido</h2></div>
+      <p class="small">Tus gastos ${base.fuente === "fijos" ? "fijos" : "promedio"} suman ≈ <b>${fmt(base.monto)}</b> al mes${base.fuente === "promedio" ? ` <span class="muted">(marca tus gastos como fijos para un cálculo más exacto)</span>` : ""}. Lo recomendado es tener de 3 a 6 meses guardados.</p>
+      ${fm ? `<p class="small">Tu meta <b>${esc(fm.nombre)}</b> cubre <b class="${cubre >= 3 ? "pos" : "warn"}">${cubre.toFixed(1)} meses</b> de gastos.</p>` : ""}
+      <div class="fondo-opts">${opc.map((o) => {
+        const sel = fm && Math.abs(+fm.objetivo - o.monto) < 1;
+        return `<button type="button" class="sim-opt ${sel ? "sel" : ""}" data-fondo="${o.monto}" aria-pressed="${!!sel}">
+          <span class="muted small">${o.n} meses</span><strong>${fmt(o.monto)}</strong>
+          <span class="small">${sel ? "✓ Es tu objetivo" : fm ? "Usar como objetivo" : "Crear meta"}</span></button>`;
+      }).join("")}</div>`;
+  }
+  $("#fondoCard").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-fondo]");
+    if (!b) return;
+    const monto = +b.dataset.fondo, fm = fondoMeta();
+    if (fm) {
+      if (Math.abs(+fm.objetivo - monto) < 1) return;
+      if (!confirm(`¿Cambiar el objetivo de "${fm.nombre}" a ${fmt(monto)}?`)) return;
+      db.update("metas", fm.id, { objetivo: monto });
+      toast("Objetivo actualizado");
+    } else {
+      db.insert("metas", { nombre: "Fondo de emergencia", objetivo: monto, saldo_inicial: 0, fecha_meta: null, aporte_quincenal: null, rendimiento_pct: 0 });
+      toast("Meta creada: define cuánto aportar por quincena en Editar");
+    }
+    render();
+  });
+
   const metasAbiertas = new Set();     // proyecciones desplegadas (sobreviven al re-render)
   function renderMetas() {
+    renderFondo();
     const ms = S.metas;
     $("#noMetas").classList.toggle("hidden", ms.length > 0);
     $("#metaTotal").textContent = ms.length ? "Ahorrado: " + fmt(sum(ms, saldoMeta)) : "";
@@ -1060,13 +1162,14 @@
     $("#gastoDelete").classList.toggle("hidden", !g);
     gastoForm.vinculo.innerHTML = `<option value="">— Ninguno —</option>` +
       (S.deudas.length ? `<optgroup label="Abono a deuda">${S.deudas.map((d) => `<option value="d:${d.id}">💳 ${esc(d.nombre)}</option>`).join("")}</optgroup>` : "") +
-      (S.metas.length ? `<optgroup label="Aporte a meta">${S.metas.map((m) => `<option value="m:${m.id}">🐷 ${esc(m.nombre)}</option>`).join("")}</optgroup>` : "");
+      (S.metas.length ? `<optgroup label="Aporte a meta">${S.metas.map((m) => `<option value="m:${m.id}">🐷 ${esc(m.nombre)}</option>`).join("")}</optgroup>` : "") +
+      (S.prestamos.length ? `<optgroup label="Préstamo a">${S.prestamos.map((x) => `<option value="p:${x.id}">🤝 ${esc(x.nombre)}</option>`).join("")}</optgroup>` : "");
     gastoForm.descripcion.value = g?.descripcion ?? "";
     gastoForm.monto.value = g ? +g.monto : "";
     gastoForm.vence.value = g?.vence ?? "";
     gastoForm.categoria.value = g?.categoria ?? "";
-    gastoForm.vinculo.value = g?.deuda_id ? "d:" + g.deuda_id : g?.meta_id ? "m:" + g.meta_id : "";
-    gastoForm.fijo.checked = g?.fijo ?? false;
+    gastoForm.vinculo.value = g?.deuda_id ? "d:" + g.deuda_id : g?.meta_id ? "m:" + g.meta_id : g?.prestamo_id ? "p:" + g.prestamo_id : "";
+    gastoForm.repetir.value = !g?.fijo ? "no" : g.frecuencia === "mensual" ? "mensual" : "quincenal";
     gastoForm.pagado.checked = g?.pagado ?? false;
     gastoDialog.showModal();
     if (!g) gastoForm.descripcion.focus();
@@ -1078,7 +1181,8 @@
     if (!gastoForm.vinculo.value) {
       const d = S.deudas.find((x) => x.nombre.toLowerCase() === desc);
       const m = S.metas.find((x) => x.nombre.toLowerCase() === desc);
-      if (d) gastoForm.vinculo.value = "d:" + d.id; else if (m) gastoForm.vinculo.value = "m:" + m.id;
+      const pr = S.prestamos.find((x) => x.nombre.toLowerCase() === desc);
+      if (d) gastoForm.vinculo.value = "d:" + d.id; else if (m) gastoForm.vinculo.value = "m:" + m.id; else if (pr) gastoForm.vinculo.value = "p:" + pr.id;
     }
     if (!gastoForm.categoria.value) {
       const v = gastoForm.vinculo.value;
@@ -1102,11 +1206,13 @@
       descripcion: gastoForm.descripcion.value.trim(),
       monto,
       pagado: gastoForm.pagado.checked,
-      fijo: gastoForm.fijo.checked,
+      fijo: gastoForm.repetir.value !== "no",
+      frecuencia: gastoForm.repetir.value === "mensual" ? "mensual" : "quincenal",
       vence: gastoForm.vence.value || null,
       categoria: gastoForm.categoria.value || null,
       deuda_id: v.startsWith("d:") ? v.slice(2) : null,
       meta_id: v.startsWith("m:") ? v.slice(2) : null,
+      prestamo_id: v.startsWith("p:") ? v.slice(2) : null,
     };
     if (editingGastoId && byId("gastos", editingGastoId)) {
       db.update("gastos", editingGastoId, row);
@@ -1125,8 +1231,8 @@
   });
 
   const nuevoAporte = (m, monto, periodo_id, orden) => ({
-    periodo_id, descripcion: m.nombre, monto: round2(monto), meta_id: m.id, deuda_id: null,
-    categoria: "ahorro", fijo: false, vence: null, pagado: false, orden,
+    periodo_id, descripcion: m.nombre, monto: round2(monto), meta_id: m.id, deuda_id: null, prestamo_id: null,
+    categoria: "ahorro", fijo: false, frecuencia: "quincenal", vence: null, pagado: false, orden,
   });
 
   function markAllPaid() {
@@ -1147,6 +1253,8 @@
     $("#ingresoDelete").classList.toggle("hidden", !i);
     ingresoForm.descripcion.value = i?.descripcion ?? "";
     ingresoForm.monto.value = i ? +i.monto : "";
+    ingresoForm.prestamo_id.innerHTML = `<option value="">— No —</option>` + S.prestamos.map((x) => `<option value="${x.id}">🤝 ${esc(x.nombre)} (te debe ${fmt(saldoPrestamo(x))})</option>`).join("");
+    ingresoForm.prestamo_id.value = i?.prestamo_id ?? "";
     ingresoDialog.showModal();
   }
   $("#addIngresoBtn").addEventListener("click", () => openIngreso());
@@ -1158,7 +1266,7 @@
     if (e.submitter?.value !== "ok") return;
     const monto = parseNum(ingresoForm.monto.value);
     if (monto == null || Number.isNaN(monto)) { e.preventDefault(); toast("Monto inválido"); return; }
-    const row = { descripcion: ingresoForm.descripcion.value.trim(), monto };
+    const row = { descripcion: ingresoForm.descripcion.value.trim(), monto, prestamo_id: ingresoForm.prestamo_id.value || null };
     if (editingIngresoId && byId("ingresos", editingIngresoId)) db.update("ingresos", editingIngresoId, row);
     else db.insert("ingresos", { ...row, periodo_id: S.currentId });
     render();
@@ -1190,6 +1298,28 @@
     return { fecha: iso(d), nombre: `${d.getDate()} de ${MESES[d.getMonth()]}` };
   }
 
+  // Qué gastos pasan a una quincena nueva:
+  //  - de la quincena actual: los fijos "cada quincena" (o todos, según el modo), sin los mensuales;
+  //  - los fijos "cada mes" vienen de la última quincena del mismo tipo (del 15 o del 30).
+  const mitad = (fecha) => (parseISO(fecha).getDate() <= 15 ? 1 : 2);
+  function gastosACopiar(src, fecha, modo) {
+    if (modo === "ninguno") return [];
+    const out = [];
+    if (src) gastosDe(src.id)
+      .filter((g) => (modo === "todos" || g.fijo) && !(g.fijo && g.frecuencia === "mensual"))
+      .forEach((g) => out.push({ g, from: src }));
+    const mismaMitad = S.periodos
+      .filter((p) => mitad(p.fecha) === mitad(fecha) && p.fecha < fecha)
+      .sort((a, b) => b.fecha.localeCompare(a.fecha))[0];
+    if (mismaMitad) {
+      const ya = new Set(out.map(({ g }) => g.descripcion.trim().toLowerCase()));
+      gastosDe(mismaMitad.id)
+        .filter((g) => g.fijo && g.frecuencia === "mensual" && !ya.has(g.descripcion.trim().toLowerCase()))
+        .forEach((g) => out.push({ g, from: mismaMitad }));
+    }
+    return out;
+  }
+
   function openPeriod(p = null) {
     editingPeriodId = p?.id ?? null;
     $("#periodTitle").textContent = p ? "Editar quincena" : "Nueva quincena";
@@ -1199,7 +1329,7 @@
     periodForm.nombre.value = p?.nombre ?? sug.nombre;
     periodForm.fecha.value = p?.fecha ?? sug.fecha;
     periodForm.salario.value = p ? +p.salario : (current() ? +current().salario : "");
-    periodForm.copiar.value = current() && gastosDe(current().id).some((g) => g.fijo) ? "fijos" : "todos";
+    periodForm.copiar.value = S.gastos.some((g) => g.fijo) ? "fijos" : "todos";
     periodDialog.showModal();
   }
 
@@ -1220,19 +1350,20 @@
     } else {
       const src = current();
       const modo = periodForm.copiar.value;
-      const copyFrom = src && modo !== "ninguno" ? gastosDe(src.id).filter((g) => modo === "todos" || g.fijo) : [];
+      const copyFrom = gastosACopiar(src, row.fecha, modo);
       const ins = db.insert("periodos", row);
       if (copyFrom.length) {
-        // Los vencimientos se corren lo mismo que la fecha de la quincena
-        const delta = daysBetween(parseISO(src.fecha), parseISO(row.fecha));
-        db.insert("gastos", copyFrom.map((g, i) => ({
+        db.insert("gastos", copyFrom.map(({ g, from }, i) => ({
           periodo_id: ins.id, descripcion: g.descripcion, monto: g.monto,
-          deuda_id: g.deuda_id, meta_id: g.meta_id ?? null, categoria: g.categoria ?? null, fijo: !!g.fijo,
-          vence: g.vence ? addDays(g.vence, delta) : null, pagado: false, orden: i + 1,
+          deuda_id: g.deuda_id, meta_id: g.meta_id ?? null, prestamo_id: g.prestamo_id ?? null,
+          categoria: g.categoria ?? null, fijo: !!g.fijo, frecuencia: g.frecuencia ?? "quincenal",
+          // Los vencimientos se corren lo mismo que la fecha de la quincena de origen
+          vence: g.vence ? addDays(g.vence, daysBetween(parseISO(from.fecha), parseISO(row.fecha))) : null,
+          pagado: false, orden: i + 1,
         })));
       }
       // Aporte planeado de cada meta (si no venía ya en los gastos copiados)
-      const yaVinculadas = new Set(copyFrom.map((g) => g.meta_id).filter(Boolean));
+      const yaVinculadas = new Set(copyFrom.map(({ g }) => g.meta_id).filter(Boolean));
       const aportes = S.metas
         .filter((m) => +m.aporte_quincenal > 0 && !yaVinculadas.has(m.id) && saldoMeta(m) < +m.objetivo)
         .map((m, i) => nuevoAporte(m, Math.min(+m.aporte_quincenal, round2(+m.objetivo - saldoMeta(m))), ins.id, copyFrom.length + i + 1));
@@ -1344,7 +1475,7 @@
     const monto = parseNum(cargoForm.monto.value);
     if (monto == null || Number.isNaN(monto) || monto === 0) { e.preventDefault(); toast("Monto inválido"); return; }
     const t = cargoTarget;
-    db.insert(t.table, { [t.field]: t.id, monto, nota: cargoForm.nota.value.trim() || null });
+    db.insert(t.table, { [t.field]: t.id, monto: round2(monto * (t.sign ?? 1)), nota: cargoForm.nota.value.trim() || t.nota || null });
     render();
   });
 
@@ -1405,6 +1536,62 @@
       db.remove("meta_movs", x.id);
       render(); toast("Movimiento eliminado");
     }
+  });
+
+  // ---------- Préstamos ----------
+  const prestamoDialog = $("#prestamoDialog");
+  const prestamoForm = $("#prestamoForm");
+  let editingPrestamoId = null;
+  function openPrestamo(pr = null) {
+    editingPrestamoId = pr?.id ?? null;
+    $("#prestamoTitle").textContent = pr ? "Editar préstamo" : "Nuevo préstamo";
+    $("#prestamoDelete").classList.toggle("hidden", !pr);
+    $("#prestamoEditHint").classList.toggle("hidden", !pr);
+    prestamoForm.nombre.value = pr?.nombre ?? "";
+    prestamoForm.saldo_inicial.value = pr ? +pr.saldo_inicial || "" : "";
+    prestamoForm.nota.value = pr?.nota ?? "";
+    prestamoDialog.showModal();
+  }
+  $("#addPrestamoBtn").addEventListener("click", () => openPrestamo());
+  prestamoForm.addEventListener("submit", (e) => {
+    if (e.submitter?.value !== "ok") return;
+    const ini = parseNum(prestamoForm.saldo_inicial.value);
+    if (Number.isNaN(ini)) { e.preventDefault(); toast("Monto inválido"); return; }
+    const row = { nombre: prestamoForm.nombre.value.trim(), saldo_inicial: ini ?? 0, nota: prestamoForm.nota.value.trim() || null };
+    if (editingPrestamoId && byId("prestamos", editingPrestamoId)) db.update("prestamos", editingPrestamoId, row);
+    else db.insert("prestamos", row);
+    render();
+  });
+  $("#prestamoDelete").addEventListener("click", () => {
+    const pr = byId("prestamos", editingPrestamoId);
+    if (!pr || !confirm(`¿Eliminar el préstamo de "${pr.nombre}"? Los gastos e ingresos se conservan.`)) return;
+    db.remove("prestamos", pr.id);
+    S.prestamoMovs = S.prestamoMovs.filter((x) => x.prestamo_id !== pr.id);
+    S.gastos.forEach((g) => { if (g.prestamo_id === pr.id) g.prestamo_id = null; });
+    S.ingresos.forEach((i) => { if (i.prestamo_id === pr.id) i.prestamo_id = null; });
+    persist();
+    prestamoDialog.close(); render();
+  });
+  $("#prestamoList").addEventListener("click", (e) => {
+    const card = e.target.closest(".prestamo");
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!card || !act) return;
+    const pr = byId("prestamos", card.dataset.id);
+    if (act === "edit") return openPrestamo(pr);
+    const target = { table: "prestamo_movs", field: "prestamo_id", id: pr.id };
+    if (act === "presto") openCargo(`Le presté a ${pr.nombre}`, { ...target, nota: "Le presté" }, "Monto");
+    if (act === "devolvio") openCargo(`${pr.nombre} me devolvió`, { ...target, sign: -1, nota: "Me devolvió" }, "Monto");
+    if (act === "del-mov") {
+      const x = byId("prestamoMovs", e.target.closest("[data-mov]").dataset.mov);
+      if (!x || !confirm(`¿Eliminar "${x.nota || "Movimiento"}" (${fmt(Math.abs(+x.monto))})?`)) return;
+      db.remove("prestamo_movs", x.id);
+      render(); toast("Movimiento eliminado");
+    }
+  });
+  // Al marcar una devolución, sugerir la descripción
+  ingresoForm.prestamo_id.addEventListener("change", () => {
+    const pr = byId("prestamos", ingresoForm.prestamo_id.value);
+    if (pr && !ingresoForm.descripcion.value.trim()) ingresoForm.descripcion.value = "Devolución " + pr.nombre;
   });
 
   // Cerrar diálogos tocando el fondo

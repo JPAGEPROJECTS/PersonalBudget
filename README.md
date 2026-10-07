@@ -18,17 +18,19 @@ Un gasto vinculado a una deuda (campo *Abono a deuda / aporte a meta*) reduce el
 
 ### Gastos
 - **Categoría** (se sugiere sola según la descripción) y **fecha de vencimiento**: arriba de la quincena aparecen avisos de lo vencido o lo que vence en ≤ 3 días.
-- **Fijo** 📌: al crear una quincena puedes copiar *solo los fijos*, *todos* o *ninguno*. Los vencimientos se corren a la nueva fecha.
+- **Repetir**: un gasto puede repetirse 📌 *cada quincena* o 📅 *cada mes, en la misma quincena* (p. ej. el alquiler solo en la del 15). Al crear una quincena puedes copiar *solo los fijos*, *todos* o *ninguno*; los mensuales se toman de la quincena del mismo tipo del mes anterior. Los vencimientos se corren a la nueva fecha.
 - **Ingresos extra** (bonos, ventas) por quincena; se suman al salario en el balance.
 - En *Reportes*, el botón 🪄 asigna categoría a los gastos viejos que no tienen.
 
 ### Deudas
 - **Día de corte, día de pago y pago mínimo**, con aviso cuando el pago está a ≤ 5 días.
 - **Uso del crédito** (saldo ÷ límite) por tarjeta y en total, con marca en 30 %.
+- **Te deben**: dinero que prestaste, por persona. Sube con *+ Le presté* o con un gasto vinculado al préstamo, y baja con *✓ Me devolvió* o con un ingreso extra marcado como devolución.
 - **Plan para salir de deudas**: con lo que pagas por quincena compara *avalancha* (primero la de mayor interés) y *bola de nieve* (primero la de menor saldo): cuántas quincenas tardas, cuánto interés pagas, en qué orden se liquidan y una gráfica del saldo proyectado. El interés puede ser mensual o quincenal.
 
 ### Ahorro
 Funciona como las deudas, pero al revés: el saldo **sube** con cada aporte.
+- **Fondo de emergencia sugerido**: calcula tu gasto fijo mensual (o el promedio, si no marcaste fijos) y propone 3 o 6 meses como objetivo; con un toque crea la meta o ajusta la existente, y muestra cuántos meses cubres.
 - **Metas** con objetivo, saldo inicial y fecha opcional, con barra de avance.
 - **Aporte por quincena**: se agrega solo como gasto (vinculado a la meta) en cada quincena nueva; cuenta como ahorro al marcarlo pagado.
 - **Proyección**: "a este ritmo llegas en N quincenas (≈ mes y año)", con gráfica y línea de meta. Si la meta tiene fecha, calcula cuánto apartar por quincena y avisa si vas atrasado.
