@@ -450,7 +450,7 @@
     $("#deudaList").innerHTML = ds.map((d) => {
       const saldo = saldoDeuda(d);
       const movs = [
-        ...S.cargos.filter((c) => c.deuda_id === d.id).map((c) => ({ t: c.created_at, label: c.nota || "Cargo", m: +c.monto })),
+        ...S.cargos.filter((c) => c.deuda_id === d.id).map((c) => ({ t: c.created_at, label: c.nota || "Cargo", m: +c.monto, cargoId: c.id })),
         ...S.gastos.filter((g) => g.deuda_id === d.id && g.pagado).map((g) => ({ t: byId("periodos", g.periodo_id)?.fecha ?? g.created_at, label: "Abono · " + pName(g.periodo_id), m: -g.monto })),
       ].sort((a, b) => String(b.t).localeCompare(String(a.t)));
       const meta = d.meta != null ? +d.meta : null;
@@ -487,7 +487,7 @@
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
-          ${movs.map((m) => `<div><span>${esc(m.label)}</span><span class="${m.m < 0 ? "pos" : "neg"}">${m.m < 0 ? "−" : "+"}${fmt(Math.abs(m.m))}</span></div>`).join("")}
+          ${movs.map((m) => `<div><span>${esc(m.label)}</span><span class="mov-amt"><span class="${m.m < 0 ? "pos" : "neg"}">${m.m < 0 ? "−" : "+"}${fmt(Math.abs(m.m))}</span>${m.cargoId ? `<button class="mov-del" type="button" data-act="del-cargo" data-cargo="${m.cargoId}" title="Eliminar cargo" aria-label="Eliminar cargo">✕</button>` : ""}</span></div>`).join("")}
         </div></details>` : ""}
       </div>`;
     }).join("");
@@ -1198,6 +1198,13 @@
       if (!confirm(`Aplicar ${+d.interes_pct}% de interés (${fmt(monto)}) a ${d.nombre}?`)) return;
       db.insert("deuda_cargos", { deuda_id: d.id, monto, nota: `Interés ${+d.interes_pct}%` });
       render(); toast("Interés aplicado");
+    }
+    if (act === "del-cargo") {
+      const c = S.cargos.find((x) => x.id === e.target.closest("[data-cargo]").dataset.cargo);
+      if (!c || !confirm(`¿Eliminar "${c.nota || "Cargo"}" (${fmt(+c.monto)}) de ${d.nombre}?`)) return;
+      db.remove("deuda_cargos", c.id);
+      render();
+      toast("Cargo eliminado");
     }
   });
 
