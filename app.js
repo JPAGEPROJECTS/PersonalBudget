@@ -312,7 +312,7 @@
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
       get("ingresos"), get("metas", "created_at"), get("meta_movs", "created_at"),
       get("prestamos", "created_at"), get("prestamo_movs", "created_at"),
-      sb.from("deudas").select("id,dia_pago,interes_frec").limit(1),
+      sb.from("deudas").select("id,dia_pago,interes_frec,pago_plan,fecha_meta").limit(1),
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
       sb.from("ingresos").select("id,prestamo_id").limit(1),
       sb.from("prestamos").select("id,fecha,fecha_pago").limit(1),
@@ -515,6 +515,7 @@
         ? Math.max(0, Math.min(100, ((+d.saldo_inicial - saldo) / (+d.saldo_inicial - meta)) * 100)) : null;
       const uso = +d.limite > 0 ? Math.max(0, (saldo / +d.limite) * 100) : null;
       const pi = deudaPagoInfo(d);
+      const plan = saldo > 0 ? planDeudaLineas(d) : [];
       const fechas = [
         d.dia_corte && `Corte: día ${d.dia_corte}`,
         d.dia_pago && `Pago: día ${d.dia_pago}${pi ? ` <b class="${pi.alert ? "warn" : ""}">(${pi.txt})</b>` : ""}`,
@@ -537,11 +538,13 @@
           ${+d.interes_pct ? `<span>Interés ${+d.interes_pct}% ${d.interes_frec === "quincenal" ? "quincenal" : "mensual"}</span>` : ""}
         </div>
         ${pct != null ? `<div class="progress meta"><div style="width:${pct}%"></div></div>` : ""}
+        ${plan.length ? `<div class="meta-plan">${plan.map((l) => `<span>${l}</span>`).join("")}</div>` : ""}
         <div class="deuda-actions">
           ${+d.interes_pct ? `<button class="btn sm" type="button" data-act="interes">+ Interés ${+d.interes_pct}%</button>` : ""}
           <button class="btn sm" type="button" data-act="cargo">± Cargo</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
+        ${saldo > 0 ? `<details class="plan" data-deuda="${d.id}" ${deudasAbiertas.has(d.id) ? "open" : ""}><summary>📅 Plan de pagos y escenarios</summary><div class="plan-body">${planDeudaHTML(d, escenariosDeuda(d))}</div></details>` : ""}
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
           ${movs.map((m) => `<div><span>${esc(m.label)}</span><span class="mov-amt"><span class="${m.m < 0 ? "pos" : "neg"}">${m.m < 0 ? "−" : "+"}${fmt(Math.abs(m.m))}</span>${m.cargoId ? `<button class="mov-del" type="button" data-act="del-cargo" data-cargo="${m.cargoId}" title="Eliminar cargo" aria-label="Eliminar cargo">✕</button>` : ""}</span></div>`).join("")}
         </div></details>` : ""}
@@ -601,7 +604,7 @@
   };
 
   function simular(deudas, pago, estrategia) {
-    const ds = deudas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: saldoDeuda(d), rate: tasaQ(d), min: +d.pago_minimo || 0 }))
+    const ds = deudas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: saldoDeuda(d), rate: tasaQ(d), min: (+d.pago_minimo || 0) / 2 }))   // mínimo mensual → por quincena
       .filter((d) => d.saldo > 0.005);
     const serie = [sum(ds, (d) => d.saldo)];
     const fin = {};
@@ -628,7 +631,7 @@
   function sugerirPago() {
     const p = current();
     const abonos = p ? sum(gastosDe(p.id).filter((g) => g.deuda_id), (g) => g.monto) : 0;
-    return round2(abonos || sum(S.deudas, (d) => d.pago_minimo));
+    return round2(abonos || sum(S.deudas, (d) => d.pago_plan) || sum(S.deudas, (d) => d.pago_minimo) / 2);
   }
 
   let simStrategy = "avalancha";
@@ -639,13 +642,13 @@
     const input = $("#simPago");
     if (document.activeElement !== input && !input.dataset.touched) input.value = sugerirPago() || "";
     const pago = parseNum(input.value);
-    const minTotal = sum(activas, (d) => d.pago_minimo);
+    const minTotal = round2(sum(activas, (d) => d.pago_minimo) / 2);   // los mínimos son mensuales
     $("#simHint").textContent = "Por defecto, la suma de los abonos a deudas de esta quincena." +
-      (minTotal ? ` Pagos mínimos: ${fmt(minTotal)}.` : "") +
+      (minTotal ? ` Pagos mínimos: ${fmt(minTotal * 2)} al mes (${fmt(minTotal)} por quincena).` : "") +
       (activas.some((d) => !+d.interes_pct) ? " Las deudas sin interés % se simulan sin interés." : "");
     const out = $("#simResults");
     if (!pago || Number.isNaN(pago) || pago <= 0) { out.innerHTML = `<p class="muted">Escribe cuánto puedes pagar por quincena.</p>`; return; }
-    if (pago < minTotal) { out.innerHTML = `<p class="warn">El pago no alcanza para cubrir los mínimos (${fmt(minTotal)}).</p>`; return; }
+    if (pago < minTotal) { out.innerHTML = `<p class="warn">El pago no alcanza para cubrir los mínimos (${fmt(minTotal)} por quincena).</p>`; return; }
 
     const av = simular(activas, pago, "avalancha");
     const bn = simular(activas, pago, "bola");
@@ -692,6 +695,180 @@
     const b = e.target.closest("[data-strat]");
     if (b) { simStrategy = b.dataset.strat; renderSim(); }
   });
+
+  // ---------- Plan de pago por deuda ----------
+  // Fecha de la quincena siguiente (15 → 30, 30 → 15 del mes siguiente; febrero cierra el 28/29)
+  const quincenaDespues = (fecha) => {
+    const [y, m, day] = fecha.split("-").map(Number);
+    let d = day < 20 ? new Date(y, m - 1, 30) : new Date(y, m, 15);
+    if (d.getDate() !== 15 && d.getDate() !== 30) d = new Date(d.getFullYear(), d.getMonth(), 0);
+    return iso(d);
+  };
+  // Abonos a la deuda que ya están en tus quincenas y aún no se pagan: se usan tal cual en el plan.
+  // El calendario arranca después de la última quincena con abono pagado (o en la última quincena si nunca se ha pagado).
+  function calendarioDeuda(d) {
+    const ps = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (!ps.length) return { reg: [], next: nextQuincena().fecha };
+    const filas = ps.map((p) => {
+      const gs = S.gastos.filter((g) => g.periodo_id === p.id && g.deuda_id === d.id);
+      return { p, pagado: sum(gs.filter((g) => g.pagado), (g) => g.monto), pendiente: round2(sum(gs.filter((g) => !g.pagado), (g) => g.monto)) };
+    });
+    const lastPaid = filas.filter((f) => f.pagado > 0).at(-1)?.p.fecha ?? null;
+    const latest = ps.at(-1).fecha;
+    const firstPend = filas.find((f) => f.pendiente > 0)?.p.fecha;
+    const desde = lastPaid ?? (firstPend && firstPend < latest ? firstPend : latest);
+    const reg = filas
+      .filter((f) => (lastPaid ? f.p.fecha > lastPaid || (f.p.fecha === lastPaid && f.pendiente > 0) : f.p.fecha >= desde))
+      .map((f) => ({ fecha: f.p.fecha, pago: f.pendiente > 0 ? f.pendiente : null }));   // null: sin abono puesto, usa el del escenario
+    return { reg, next: quincenaDespues(reg.at(-1)?.fecha ?? latest) };
+  }
+
+  // Pago por quincena para las quincenas que aún no tienen abono: el planeado o, si no hay,
+  // el promedio de las últimas 6 quincenas que tienen abono (pagado o por pagar)
+  function ritmoDeuda(d) {
+    if (+d.pago_plan > 0) return { monto: +d.pago_plan, fuente: "plan" };
+    const vals = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .map((p) => sum(S.gastos.filter((g) => g.periodo_id === p.id && g.deuda_id === d.id), (g) => g.monto))
+      .filter((v) => v > 0).slice(-6);
+    if (!vals.length) return { monto: 0, fuente: "promedio" };
+    return { monto: round2(sum(vals) / vals.length), fuente: "promedio" };
+  }
+
+  // Tabla quincena a quincena: primero se suma el interés y luego se abona.
+  // Las quincenas con abono puesto usan ese monto; las demás, el pago del escenario.
+  function proyectarDeuda(d, pago, cal = calendarioDeuda(d)) {
+    const r = tasaQ(d);
+    let saldo = saldoDeuda(d), interes = 0, pagado = 0, k = 0, fecha = null;
+    const filas = [];
+    while (saldo > 0.005 && filas.length < 600) {
+      const f = cal.reg[k++];
+      fecha = f ? f.fecha : k === cal.reg.length + 1 ? cal.next : quincenaDespues(fecha);
+      const reg = f?.pago != null;
+      const i = round2(saldo * r);
+      const p = round2(Math.min(reg ? f.pago : pago, saldo + i));
+      if (!reg && p <= i) return { ok: false, filas, interes: round2(interes) };   // el pago no cubre el interés
+      saldo = round2(saldo + i - p); interes += i; pagado += p;
+      filas.push({ fecha, pago: p, interes: i, saldo: Math.max(0, saldo), reg });
+    }
+    return { ok: saldo <= 0.005, filas, quincenas: filas.length, interes: round2(interes), pagado: round2(pagado), fin: filas.at(-1)?.fecha };
+  }
+
+  // Cuánto pagar en las quincenas sin abono puesto para terminar a más tardar en la fecha meta
+  function pagoParaFecha(d, fecha = d.fecha_meta) {
+    if (!fecha) return null;
+    const cal = calendarioDeuda(d);
+    const primera = cal.reg[0]?.fecha ?? cal.next;
+    if (fecha < primera) return { error: "pasada" };
+    if (saldoDeuda(d) <= 0) return { pago: 0, quincenas: 0 };
+    const llega = (x) => { const r = proyectarDeuda(d, x, cal); return r.ok && r.fin <= fecha ? r : null; };
+    const solo = llega(0);
+    if (solo) return { pago: 0, quincenas: solo.quincenas };
+    let hi = saldoDeuda(d) * 2 + 1;
+    if (!llega(hi)) return { error: "registrado" };     // la fecha cae antes de terminar lo ya registrado
+    let lo = 0;
+    for (let n = 0; n < 40; n++) { const mid = (lo + hi) / 2; if (llega(mid)) hi = mid; else lo = mid; }
+    const pago = Math.ceil(hi * 100) / 100;
+    return { pago, quincenas: llega(pago)?.quincenas ?? 0 };
+  }
+
+  const redondeoArriba = (v) => { const step = v < 100 ? 5 : v < 500 ? 10 : 50; return Math.ceil(v / step) * step; };
+  const plural = (n, s) => `${n} ${s}${n === 1 ? "" : "s"}`;
+  const quincTxt = (n) => plural(n, "quincena");
+
+  // Escenarios para comparar: tu plan, el de la fecha meta, pagar más y solo el mínimo
+  function escenariosDeuda(d) {
+    const cal = calendarioDeuda(d);
+    const ritmo = ritmoDeuda(d);
+    const out = [];
+    if (ritmo.monto > 0) out.push({ key: "plan", title: ritmo.fuente === "plan" ? "Tu plan" : "Tu ritmo actual", sub: ritmo.fuente === "plan" ? "Pago planeado" : "Promedio de tus abonos", pago: ritmo.monto });
+    const pf = pagoParaFecha(d);
+    if (pf?.pago > 0 && (!ritmo.monto || Math.abs(pf.pago - ritmo.monto) >= 1)) out.push({ key: "fecha", title: `Terminar en ${monthYear(parseISO(d.fecha_meta))}`, sub: "Tu fecha meta", pago: pf.pago });
+    const base = ritmo.monto || pf?.pago || (+d.pago_minimo || 0) / 2;
+    if (base > 0) out.push({ key: "mas", title: "Pagando más", sub: "50% más por quincena", pago: redondeoArriba(base * 1.5) });
+    const minQ = round2((+d.pago_minimo || 0) / 2);            // el mínimo es mensual: la mitad por quincena
+    if (minQ > 0 && Math.abs(minQ - base) >= 1) out.push({ key: "min", title: "Solo el mínimo", sub: `${fmt(+d.pago_minimo)} al mes`, pago: minQ });
+    return out.map((e) => ({ ...e, r: proyectarDeuda(d, e.pago, cal) }));
+  }
+
+  const deudaEsc = new Map();          // escenario elegido por deuda
+  const deudasAbiertas = new Set();    // planes desplegados (sobreviven al re-render)
+
+  function planDeudaHTML(d, escs) {
+    if (!escs.length) return `<p class="muted small">Define un <b>pago planeado por quincena</b> o una <b>fecha para terminar</b> en Editar y aquí verás el calendario de pagos.</p>`;
+    const sel = escs.find((e) => e.key === deudaEsc.get(d.id)) ?? escs[0];
+    const ref = escs[0];
+    const regs = calendarioDeuda(d).reg.filter((f) => f.pago != null);
+    const cmp = (e) => {
+      if (e === ref || !e.r.ok || !ref.r.ok) return "";
+      const dq = ref.r.quincenas - e.r.quincenas, di = round2(ref.r.interes - e.r.interes);
+      const t = [dq > 0 ? `${quincTxt(dq)} antes` : dq < 0 ? `${quincTxt(-dq)} después` : "",
+        di > 0.5 ? `ahorras ${fmt(di)}` : di < -0.5 ? `${fmt(-di)} más de interés` : ""].filter(Boolean).join(" · ");
+      return t ? `<span class="small ${di > 0.5 || dq > 0 ? "pos" : "warn"}">${di > 0.5 || dq > 0 ? "✓" : "⚠️"} ${t}</span>` : "";
+    };
+    const card = (e) => `
+      <button type="button" class="sim-opt ${e === sel ? "sel" : ""}" data-act="esc" data-esc="${e.key}" aria-pressed="${e === sel}">
+        <span class="sim-title">${esc(e.title)}</span>
+        <span class="muted small">${esc(e.sub)}</span>
+        <strong>${regs.length ? `<span class="muted small">luego </span>` : ""}${fmt(e.pago)}<span class="muted small"> /quinc.</span></strong>
+        ${e.r.ok ? `<span class="small">Terminas ${monthYear(parseISO(e.r.fin))} · ${quincTxt(e.r.quincenas)}</span>
+        <span class="small">Interés: ${fmt(e.r.interes)}</span>${cmp(e)}`
+        : `<span class="neg small">No se termina: el interés es mayor que el pago</span>`}
+      </button>`;
+    const r = sel.r;
+    const MAXF = 120;
+    const usar = sel.key !== "plan" || ritmoDeuda(d).fuente !== "plan";
+    return `
+      ${regs.length ? `<p class="small plan-nota">📝 Se ${regs.length === 1 ? "usa el <b>abono</b>" : `usan los <b>${regs.length} abonos</b>`} que ya pusiste en tus quincenas (${fmt(sum(regs, (f) => f.pago))}). Cada escenario dice cuánto pagar <b>en las quincenas siguientes</b>.</p>` : ""}
+      <div class="esc-grid">${escs.map(card).join("")}</div>
+      ${usar ? `<button type="button" class="btn sm primary" data-act="usar-plan" data-pago="${sel.pago}">Usar ${fmt(sel.pago)} por quincena como mi plan</button>` : ""}
+      ${r.filas.length ? `
+      <div class="plan-tabla">
+        <table>
+          <thead><tr><th>Quincena</th><th>Pago</th><th>Interés</th><th>Saldo</th></tr></thead>
+          <tbody>${r.filas.slice(0, MAXF).map((f, i) => `
+            <tr class="${r.ok && i === r.filas.length - 1 ? "fin" : ""}"><td>${longDate(f.fecha)}${f.reg ? ` <span title="Abono puesto en tu quincena">📝</span>` : ""}</td><td>${f.reg ? `<b>${fmt(f.pago)}</b>` : fmt(f.pago)}</td><td class="muted">${f.interes ? fmt(f.interes) : "—"}</td><td>${f.saldo > 0 ? fmt(f.saldo) : "<b class='pos'>$0 ✓</b>"}</td></tr>`).join("")}
+          </tbody>
+        </table>
+        ${r.filas.length > MAXF ? `<p class="muted small">… y ${r.filas.length - MAXF} quincenas más.</p>` : ""}
+      </div>
+      ${regs.length ? `<p class="muted small">📝 = monto que pusiste en esa quincena. Las demás usan ${fmt(sel.pago)}.</p>` : ""}
+      ${r.ok ? `<p class="small">Total a pagar <b>${fmt(r.pagado)}</b>, de los cuales <b class="${r.interes > 0 ? "warn" : ""}">${fmt(r.interes)}</b> son intereses.</p>` : ""}` : ""}`;
+  }
+
+  // Resumen corto del plan para la tarjeta de la deuda
+  function planDeudaLineas(d) {
+    const lines = [];
+    const ritmo = ritmoDeuda(d);
+    const regs = calendarioDeuda(d).reg.filter((f) => f.pago != null);
+    if (ritmo.monto > 0 || regs.length) {
+      const r = proyectarDeuda(d, ritmo.monto);
+      const tarde = r.ok && d.fecha_meta && r.fin > d.fecha_meta;
+      const como = r.ok && r.filas.every((f) => f.reg)
+        ? "Con los abonos que ya pusiste"
+        : (regs.length ? `${regs.length === 1 ? "Con tu abono ya puesto" : `Con tus ${regs.length} abonos ya puestos`} (${fmt(sum(regs, (f) => f.pago))}) y luego ` : "Pagando ") +
+          `${fmt(ritmo.monto)}/quinc.${ritmo.fuente === "promedio" ? " (promedio)" : ""}`;
+      lines.push(r.ok
+        ? `${como} terminas en <b>${monthYear(parseISO(r.fin))}</b> · ${quincTxt(r.quincenas)}${r.interes > 0 ? ` · interés ${fmt(r.interes)}` : ""}${tarde ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
+        : `<span class="neg">⚠️ ${ritmo.monto > 0 ? `Con ${fmt(ritmo.monto)}/quinc. no se termina de pagar: el interés es mayor o igual al pago` : "Define un pago planeado para las quincenas siguientes"}</span>`);
+    }
+    if (d.fecha_meta) {
+      const pf = pagoParaFecha(d);
+      lines.push(pf.error === "pasada"
+        ? `<span class="warn">Tu fecha para terminar (${longDate(d.fecha_meta)}) ya pasó</span>`
+        : pf.error === "registrado"
+        ? `<span class="warn">Con los abonos que ya pusiste no alcanzas a terminar el ${longDate(d.fecha_meta)}: sube los montos de esas quincenas</span>`
+        : pf.pago === 0
+        ? `Con los abonos que ya pusiste terminas antes del ${longDate(d.fecha_meta)} ✓`
+        : `Para terminar el ${longDate(d.fecha_meta)}: paga <b>${fmt(pf.pago)}</b> por quincena${regs.length ? " después de lo ya puesto" : ""} (${quincTxt(pf.quincenas)} en total)`);
+    }
+    return lines;
+  }
+
+  $("#deudaList").addEventListener("toggle", (e) => {
+    const det = e.target;
+    if (!det.matches?.("details.plan")) return;
+    if (det.open) deudasAbiertas.add(det.dataset.deuda); else deudasAbiertas.delete(det.dataset.deuda);
+  }, true);
 
   // ---------- Metas de ahorro ----------
   const tasaMetaQ = (m) => Math.pow(1 + (+m.rendimiento_pct || 0) / 100, 0.5) - 1;   // % mensual -> por quincena
@@ -1406,9 +1583,20 @@
         .filter((m) => +m.aporte_quincenal > 0 && !yaVinculadas.has(m.id) && saldoMeta(m) < +m.objetivo)
         .map((m, i) => nuevoAporte(m, Math.min(+m.aporte_quincenal, round2(+m.objetivo - saldoMeta(m))), ins.id, copyFrom.length + i + 1));
       if (aportes.length) db.insert("gastos", aportes);
+      // Abono planeado de cada deuda (si no venía ya en los gastos copiados)
+      const yaDeudas = new Set(copyFrom.map(({ g }) => g.deuda_id).filter(Boolean));
+      const abonos = S.deudas
+        .filter((d) => +d.pago_plan > 0 && !yaDeudas.has(d.id) && saldoDeuda(d) > 0)
+        .map((d, i) => ({
+          periodo_id: ins.id, descripcion: "Abono " + d.nombre, monto: round2(Math.min(+d.pago_plan, saldoDeuda(d))),
+          deuda_id: d.id, meta_id: null, prestamo_id: null, categoria: "deudas", fijo: false, frecuencia: "quincenal",
+          vence: null, pagado: false, orden: copyFrom.length + aportes.length + i + 1,
+        }));
+      if (abonos.length) db.insert("gastos", abonos);
       S.currentId = ins.id;
-      const n = copyFrom.length + aportes.length;
-      toast(n ? `Quincena creada con ${n} gasto(s)${aportes.length ? ` (${aportes.length} aporte(s) a metas)` : ""}` : "Quincena creada");
+      const n = copyFrom.length + aportes.length + abonos.length;
+      const extras = [aportes.length && `${aportes.length} aporte(s) a metas`, abonos.length && `${abonos.length} abono(s) a deudas`].filter(Boolean).join(", ");
+      toast(n ? `Quincena creada con ${n} gasto(s)${extras ? ` (${extras})` : ""}` : "Quincena creada");
     }
     render(); setTab("periodo");
   });
@@ -1445,17 +1633,20 @@
     deudaForm.dia_corte.value = d?.dia_corte ?? "";
     deudaForm.dia_pago.value = d?.dia_pago ?? "";
     deudaForm.pago_minimo.value = d?.pago_minimo ?? "";
+    deudaForm.pago_plan.value = d?.pago_plan ?? "";
+    deudaForm.fecha_meta.value = d?.fecha_meta ?? "";
     deudaDialog.showModal();
   }
 
   deudaForm.addEventListener("submit", (e) => {
     if (e.submitter?.value !== "ok") return;
-    const nums = ["saldo_inicial", "limite", "meta", "interes_pct", "pago_minimo"].map((k) => parseNum(deudaForm[k].value));
+    const nums = ["saldo_inicial", "limite", "meta", "interes_pct", "pago_minimo", "pago_plan"].map((k) => parseNum(deudaForm[k].value));
     if (nums.some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
-    const [saldo_inicial, limite, meta, interes_pct, pago_minimo] = nums;
+    const [saldo_inicial, limite, meta, interes_pct, pago_minimo, pago_plan] = nums;
     const row = {
       nombre: deudaForm.nombre.value.trim(), saldo_inicial: saldo_inicial ?? 0, limite, meta, interes_pct: interes_pct ?? 0,
       interes_frec: deudaForm.interes_frec.value, pago_minimo,
+      pago_plan: pago_plan > 0 ? pago_plan : null, fecha_meta: deudaForm.fecha_meta.value || null,
       dia_corte: parseDay(deudaForm.dia_corte.value), dia_pago: parseDay(deudaForm.dia_pago.value),
     };
     if (editingDeudaId && byId("deudas", editingDeudaId)) db.update("deudas", editingDeudaId, row);
@@ -1491,6 +1682,15 @@
     if (!card || !act) return;
     const d = byId("deudas", card.dataset.id);
     if (act === "edit") return openDeuda(d);
+    const escBtn = e.target.closest("[data-esc]");
+    if (escBtn) { deudaEsc.set(d.id, escBtn.dataset.esc); renderDeudas(); return; }
+    if (act === "usar-plan") {
+      const pago = +e.target.closest("[data-pago]").dataset.pago;
+      db.update("deudas", d.id, { pago_plan: pago });
+      deudaEsc.delete(d.id);
+      render(); toast(`Plan de ${d.nombre}: ${fmt(pago)} por quincena`);
+      return;
+    }
     if (act === "cargo") openCargo("Cargo a " + d.nombre, { table: "deuda_cargos", field: "deuda_id", id: d.id }, "Positivo suma, negativo resta");
     if (act === "interes") {
       const monto = round2((saldoDeuda(d) * +d.interes_pct) / 100);

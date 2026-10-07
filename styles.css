@@ -473,3 +473,26 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
   body[data-tab="periodo"] .fab { display: none; }  /* ya hay "+ Agregar" en el panel */
 
 }
+
+/* ---------- Plan de pagos por deuda ---------- */
+details.plan[open] > summary { margin-bottom: 10px; }
+details.plan summary { color: var(--primary); font-weight: 600; }
+.plan-body { display: grid; gap: 10px; }
+.plan-body > p { margin: 0; }
+.plan-body > .btn { justify-self: start; }
+.esc-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.esc-grid .sim-opt { align-content: start; }
+/* La tarjeta con el plan abierto ocupa todo el ancho de la cuadrícula */
+#deudaList .deuda:has(details.plan[open]) { grid-column: 1 / -1; }
+.esc-grid .sim-opt strong { font-size: 1.05rem; }
+.plan-tabla { max-width: 760px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.plan-tabla table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.plan-tabla th, .plan-tabla td { padding: 7px 10px; text-align: right; white-space: nowrap; }
+.plan-tabla th:first-child, .plan-tabla td:first-child { text-align: left; }
+.plan-tabla thead th {
+  position: sticky; top: 0; background: var(--surface-2); color: var(--muted);
+  font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .03em;
+}
+.plan-tabla tbody tr + tr td { border-top: 1px solid var(--border); }
+.plan-tabla tr.fin td { background: color-mix(in srgb, var(--pos) 10%, transparent); font-weight: 600; }
+.plan-tabla p { margin: 0; padding: 8px 10px; }
