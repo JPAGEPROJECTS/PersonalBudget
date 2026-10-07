@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <title>Presupuesto Quincenal</title>
+  <script>
+    // Aplica el tema antes de pintar para evitar parpadeo
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("theme"); } catch (e) {}
+      if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand">💰 Presupuesto</h1>
+    <button id="themeToggle" class="icon-btn" type="button" aria-label="Cambiar tema" title="Modo oscuro">
+      <span class="sun">☀️</span><span class="moon">🌙</span>
+    </button>
+  </header>
+
+  <!-- ===== Mensaje de configuración / error ===== -->
+  <main id="setupView" class="view hidden">
+    <div class="card setup-card">
+      <h2 id="setupTitle">Configura Supabase</h2>
+      <p class="muted" id="setupMsg"></p>
+    </div>
+  </main>
+
+  <!-- ===== App ===== -->
+  <main id="appView" class="view hidden">
+
+    <!-- Quincena -->
+    <section id="tab-periodo" class="tab">
+      <div class="period-bar">
+        <select id="periodSelect" aria-label="Quincena"></select>
+        <button id="periodMenuBtn" class="icon-btn" type="button" aria-label="Opciones de quincena">⋯</button>
+      </div>
+
+      <div id="emptyPeriods" class="card empty hidden">
+        <p>Aún no tienes quincenas.</p>
+        <button class="btn primary" type="button" data-action="new-period">Crear primera quincena</button>
+      </div>
+
+      <div id="periodContent" class="hidden">
+        <div class="card hero">
+          <div class="hero-row">
+            <span class="label">Balance restante</span>
+            <span id="balance" class="hero-amount">$0.00</span>
+          </div>
+          <div class="progress" aria-hidden="true"><div id="progressBar"></div></div>
+          <div class="hero-sub">
+            <span id="paidCount">0 de 0 pagados</span>
+            <span id="afterAll" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="stats">
+          <label class="stat salary">
+            <span class="label">Salario</span>
+            <input id="salaryInput" type="text" inputmode="decimal" autocomplete="off" aria-label="Salario quincenal">
+          </label>
+          <div class="stat"><span class="label">Total gastos</span><strong id="totalGastos">$0.00</strong></div>
+          <div class="stat"><span class="label">Pagado</span><strong id="totalPagado" class="pos">$0.00</strong></div>
+          <div class="stat"><span class="label">Pendiente</span><strong id="totalPendiente" class="warn">$0.00</strong></div>
+        </div>
+
+        <div class="list-head">
+          <h2>Gastos</h2>
+          <button id="hidePaidBtn" class="chip" type="button" aria-pressed="false">Ocultar pagados</button>
+        </div>
+        <ul id="gastoList" class="list"></ul>
+        <p id="noGastos" class="muted center hidden">Sin gastos. Toca <b>+</b> para agregar.</p>
+      </div>
+    </section>
+
+    <!-- Deudas -->
+    <section id="tab-deudas" class="tab hidden">
+      <div class="list-head">
+        <h2>Deudas</h2>
+        <span id="deudaTotal" class="muted"></span>
+      </div>
+      <div id="deudaList"></div>
+      <p id="noDeudas" class="muted center hidden">No tienes deudas registradas. Toca <b>+</b> para agregar una.</p>
+    </section>
+
+    <!-- Historial -->
+    <section id="tab-historial" class="tab hidden">
+      <div class="list-head"><h2>Historial</h2></div>
+      <div id="historyTotals" class="stats three"></div>
+      <ul id="historyList" class="list"></ul>
+    </section>
+
+    <button id="fab" class="fab" type="button" aria-label="Agregar">+</button>
+  </main>
+
+  <nav id="bottomNav" class="bottom-nav hidden">
+    <button type="button" data-tab="periodo" class="active"><span>🗓️</span>Quincena</button>
+    <button type="button" data-tab="deudas"><span>💳</span>Deudas</button>
+    <button type="button" data-tab="historial"><span>📊</span>Historial</button>
+  </nav>
+
+  <!-- ===== Diálogos ===== -->
+  <dialog id="gastoDialog" class="sheet">
+    <form method="dialog" id="gastoForm">
+      <h3 id="gastoTitle">Nuevo gasto</h3>
+      <label>Descripción<input name="descripcion" required maxlength="80" autocomplete="off"></label>
+      <label>Monto<input name="monto" type="text" inputmode="decimal" placeholder="0.00 (acepta 50+20)" autocomplete="off"></label>
+      <label>Abono a deuda<select name="deuda_id"><option value="">— Ninguna —</option></select></label>
+      <label class="check"><input type="checkbox" name="pagado"> Pagado</label>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="gastoDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="periodDialog" class="sheet">
+    <form method="dialog" id="periodForm">
+      <h3 id="periodTitle">Nueva quincena</h3>
+      <label>Nombre<input name="nombre" required maxlength="40" placeholder="15 de Octubre"></label>
+      <label>Fecha<input name="fecha" type="date" required></label>
+      <label>Salario<input name="salario" type="text" inputmode="decimal" autocomplete="off" placeholder="505"></label>
+      <label class="check copy-row"><input type="checkbox" name="copiar" checked> Copiar gastos de la quincena actual (sin marcar como pagados)</label>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="periodDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="deudaDialog" class="sheet">
+    <form method="dialog" id="deudaForm">
+      <h3 id="deudaTitle">Nueva deuda</h3>
+      <label>Nombre<input name="nombre" required maxlength="40"></label>
+      <label>Saldo actual<input name="saldo_inicial" type="text" inputmode="decimal" required autocomplete="off"></label>
+      <div class="grid2">
+        <label>Límite (opcional)<input name="limite" type="text" inputmode="decimal" autocomplete="off"></label>
+        <label>Meta (opcional)<input name="meta" type="text" inputmode="decimal" autocomplete="off" placeholder="1000"></label>
+      </div>
+      <label>Interés % (por aplicación)<input name="interes_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="2"></label>
+      <p class="muted small" id="deudaEditHint">Al editar, el saldo es el inicial; los abonos y cargos se suman/restan automáticamente.</p>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="deudaDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="cargoDialog" class="sheet">
+    <form method="dialog" id="cargoForm">
+      <h3 id="cargoTitle">Agregar cargo</h3>
+      <label>Monto<input name="monto" type="text" inputmode="decimal" required autocomplete="off" placeholder="Positivo suma, negativo resta"></label>
+      <label>Nota<input name="nota" maxlength="60" placeholder="Interés, compra…"></label>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="menuSheet" class="menu hidden" role="menu">
+    <button type="button" data-action="new-period" role="menuitem">➕ Nueva quincena</button>
+    <button type="button" data-action="edit-period" role="menuitem">✏️ Editar quincena</button>
+    <button type="button" data-action="mark-all" role="menuitem">✅ Marcar todo pagado</button>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="loader" class="loader hidden"><div></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
