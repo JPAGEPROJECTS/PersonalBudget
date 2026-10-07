@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <header class="topbar">
@@ -157,6 +157,11 @@
         <div id="chartDeuda" class="chart"></div>
       </div>
 
+      <div class="card chart-card" id="ahorroCard">
+        <h3>Ahorro total</h3>
+        <div id="chartAhorro" class="chart"></div>
+      </div>
+
       <div class="card chart-card">
         <h3>Gastos por categoría</h3>
         <div id="chartCats"></div>
@@ -273,7 +278,12 @@
         <label>Objetivo<input name="objetivo" type="text" inputmode="decimal" required autocomplete="off" placeholder="2000"></label>
         <label>Ya tengo<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
       </div>
+      <div class="grid2">
+        <label>Aporte por quincena<input name="aporte_quincenal" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
+        <label>Rendimiento % mensual<input name="rendimiento_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
+      </div>
       <label>Lograrla para (opcional)<input name="fecha_meta" type="date"></label>
+      <p class="muted small">El aporte se agrega como gasto en cada quincena nueva (vinculado a la meta). Cuenta como ahorro cuando lo marcas pagado.</p>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="metaDelete">Eliminar</button>
         <span class="spacer"></span>
@@ -306,7 +316,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script src="config.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

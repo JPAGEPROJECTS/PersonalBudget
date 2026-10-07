@@ -28,7 +28,13 @@ Un gasto vinculado a una deuda (campo *Abono a deuda / aporte a meta*) reduce el
 - **Plan para salir de deudas**: con lo que pagas por quincena compara *avalancha* (primero la de mayor interés) y *bola de nieve* (primero la de menor saldo): cuántas quincenas tardas, cuánto interés pagas, en qué orden se liquidan y una gráfica del saldo proyectado. El interés puede ser mensual o quincenal.
 
 ### Ahorro
-- **Metas** con objetivo y fecha opcional: muestra el avance y cuánto apartar por quincena para llegar. Aportes y retiros manuales con *± Aporte / retiro*.
+Funciona como las deudas, pero al revés: el saldo **sube** con cada aporte.
+- **Metas** con objetivo, saldo inicial y fecha opcional, con barra de avance.
+- **Aporte por quincena**: se agrega solo como gasto (vinculado a la meta) en cada quincena nueva; cuenta como ahorro al marcarlo pagado.
+- **Proyección**: "a este ritmo llegas en N quincenas (≈ mes y año)", con gráfica y línea de meta. Si la meta tiene fecha, calcula cuánto apartar por quincena y avisa si vas atrasado.
+- **Rendimiento % mensual** (cuentas que pagan interés) con botón *+ Rendimiento*, y aportes/retiros manuales que se pueden eliminar con ✕.
+- En la quincena aparece un aviso 🐷 cuando lo planeado no alcanza para ir al día, con un botón para agregar el aporte que falta.
+- En *Reportes*, gráfica del **ahorro total** por quincena.
 
 ### App instalable y sin conexión
 - Se instala como app (ícono propio, pantalla completa). En Chrome/Edge aparece el botón ⬇️ arriba.
@@ -50,7 +56,7 @@ Publícala en un hosting estático, por ejemplo GitHub Pages (sube la carpeta a 
 
 Para probar en tu PC sin publicar, basta con abrir `index.html` con doble clic (así no se instala ni funciona sin conexión: eso requiere `https`, que GitHub Pages ya da).
 
-Al publicar una versión nueva, sube el número de `CACHE` en `sw.js` (p. ej. `presupuesto-v3`) para que los celulares descarguen los archivos nuevos.
+Al publicar una versión nueva, sube el número de `CACHE` en `sw.js` y el `?v=` de `styles.css`, `app.js` y `config.js` en `index.html` (y en `sw.js`), para que navegadores y celulares descarguen los archivos nuevos en lugar de usar los guardados.
 
 ## Archivos
 

@@ -353,3 +353,15 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
 
 .bottom-nav { grid-template-columns: repeat(4, 1fr); }
 #deudaSummary.stats { grid-template-columns: 1fr 1fr; }
+
+/* ---------- Metas: plan y avisos ---------- */
+.meta-plan { display: grid; gap: 4px; font-size: .85rem; }
+.proj .chart { margin-top: 8px; }
+.chart .tick.ref { fill: var(--text); opacity: .7; }
+.alert { align-items: center; }
+.alert .alert-txt { flex: 1; }
+.alert .btn { flex: none; }
+.alert.info {
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}

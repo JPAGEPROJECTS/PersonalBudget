@@ -80,6 +80,8 @@ alter table public.gastos add column if not exists vence      date;
 alter table public.gastos add column if not exists categoria  text;
 alter table public.gastos add column if not exists fijo       boolean not null default false;  -- se copia a cada quincena
 alter table public.gastos add column if not exists meta_id    uuid references public.metas(id) on delete set null; -- aporte a una meta
+alter table public.metas  add column if not exists rendimiento_pct  numeric(6,3) not null default 0; -- % mensual
+alter table public.metas  add column if not exists aporte_quincenal numeric(12,2);  -- se agrega solo a cada quincena nueva
 alter table public.deudas add column if not exists dia_corte   smallint check (dia_corte between 1 and 31);
 alter table public.deudas add column if not exists dia_pago    smallint check (dia_pago between 1 and 31);
 alter table public.deudas add column if not exists pago_minimo numeric(12,2);

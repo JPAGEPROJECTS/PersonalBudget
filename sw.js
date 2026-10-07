@@ -1,8 +1,8 @@
 // Service worker: guarda los archivos de la app para que abra sin conexión.
 // Los datos de Supabase no pasan por aquí; app.js los guarda en el dispositivo.
-const CACHE = "presupuesto-v2";
+const CACHE = "presupuesto-v3";   // súbelo en cada versión nueva (y el ?v= de index.html)
 const ASSETS = [
-  "./", "./index.html", "./styles.css", "./app.js", "./config.js", "./manifest.webmanifest",
+  "./", "./index.html", "./styles.css?v=3", "./app.js?v=3", "./config.js?v=3", "./manifest.webmanifest",
   "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon-32.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
 ];

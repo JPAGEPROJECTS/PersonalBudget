@@ -288,6 +288,7 @@
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
       get("ingresos"), get("metas", "created_at"), get("meta_movs", "created_at"),
       sb.from("deudas").select("id,dia_pago,interes_frec").limit(1),
+      sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
     ]);
     const bad = results.find((r) => r.error);
     if (bad) return { error: bad.error, status: bad.status };
@@ -367,9 +368,24 @@
       const pi = deudaPagoInfo(d);
       if (pi?.alert) items.push({ cls: pi.n <= 1 ? "neg" : "warn", html: `💳 <b>${esc(d.nombre)}</b>: ${pi.txt} (día ${d.dia_pago})${d.pago_minimo ? ` · mínimo ${fmt(+d.pago_minimo)}` : ""}` });
     });
+    // Metas: solo en la quincena más reciente, si lo planeado no alcanza el ritmo necesario
+    if (p.id === S.periodos[0]?.id) S.metas.forEach((m) => {
+      const falta = round2(+m.objetivo - saldoMeta(m));
+      if (falta <= 0) return;
+      const nec = aporteNecesario(m);
+      const meta = nec ?? (+m.aporte_quincenal || 0);
+      const planeado = round2(sum(gs.filter((g) => g.meta_id === m.id), (g) => g.monto));
+      if (meta <= 0 || planeado >= meta - 0.5) return;
+      const add = round2(Math.min(meta - planeado, falta));
+      items.push({
+        cls: "info", icon: "🐷",
+        html: `<b>${esc(m.nombre)}</b>: ${nec != null ? `para llegar al ${longDate(m.fecha_meta)} necesitas ${fmt(meta)} por quincena` : `tu aporte es de ${fmt(meta)}`}; ${planeado ? `tienes ${fmt(planeado)} planeado` : "no hay aporte en esta quincena"}.`,
+        btn: `<button class="btn sm" type="button" data-action="add-aporte" data-meta="${m.id}" data-monto="${add}">+ ${fmt(add)}</button>`,
+      });
+    });
     const box = $("#alerts");
     box.classList.toggle("hidden", !items.length);
-    box.innerHTML = items.map((a) => `<div class="alert ${a.cls}"><span aria-hidden="true">⚠️</span><span>${a.html}</span></div>`).join("");
+    box.innerHTML = items.map((a) => `<div class="alert ${a.cls}"><span aria-hidden="true">${a.icon ?? "⚠️"}</span><span class="alert-txt">${a.html}</span>${a.btn ?? ""}</div>`).join("");
   }
 
   function renderPeriodo() {
@@ -596,6 +612,45 @@
   });
 
   // ---------- Metas de ahorro ----------
+  const tasaMetaQ = (m) => Math.pow(1 + (+m.rendimiento_pct || 0) / 100, 0.5) - 1;   // % mensual -> por quincena
+  const quincenasHasta = (fecha) => Math.max(1, Math.ceil(daysBetween(today(), parseISO(fecha)) / 15.22));
+
+  // Cuánto se aporta por quincena: el plan de la meta o, si no hay, el promedio
+  // de los aportes pagados en las últimas 6 quincenas (desde el primero que hubo)
+  function ritmoMeta(m) {
+    if (+m.aporte_quincenal > 0) return { monto: +m.aporte_quincenal, fuente: "plan" };
+    const ps = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-6);
+    const porP = ps.map((p) => sum(S.gastos.filter((g) => g.periodo_id === p.id && g.meta_id === m.id && g.pagado), (g) => g.monto));
+    const first = porP.findIndex((v) => v > 0);
+    if (first < 0) return { monto: 0, fuente: "promedio" };
+    const vals = porP.slice(first);
+    return { monto: round2(sum(vals) / vals.length), fuente: "promedio" };
+  }
+
+  // Aporte necesario por quincena para llegar a la fecha (considera el rendimiento)
+  function aporteNecesario(m) {
+    if (!m.fecha_meta || daysBetween(today(), parseISO(m.fecha_meta)) < 0) return null;
+    const falta = +m.objetivo - saldoMeta(m);
+    if (falta <= 0) return 0;
+    const n = quincenasHasta(m.fecha_meta), r = tasaMetaQ(m), saldo = saldoMeta(m);
+    if (!r) return round2(falta / n);
+    const crec = Math.pow(1 + r, n);
+    return round2(Math.max(0, (+m.objetivo - saldo * crec) * r / (crec - 1)));
+  }
+
+  function proyectarMeta(m, aporte) {
+    const r = tasaMetaQ(m), obj = +m.objetivo;
+    let saldo = saldoMeta(m), k = 0;
+    const serie = [round2(saldo)];
+    while (saldo < obj - 0.005 && k < 600) {
+      saldo = saldo * (1 + r) + aporte; k++;
+      serie.push(round2(saldo));
+      if (k > 2 && saldo <= serie[k - 1]) return { ok: false, serie };
+    }
+    return { ok: saldo >= obj - 0.005, quincenas: k, serie };
+  }
+
+  const metasAbiertas = new Set();     // proyecciones desplegadas (sobreviven al re-render)
   function renderMetas() {
     const ms = S.metas;
     $("#noMetas").classList.toggle("hidden", ms.length > 0);
@@ -606,17 +661,28 @@
       const obj = +m.objetivo;
       const pct = obj > 0 ? Math.max(0, Math.min(100, (saldo / obj) * 100)) : 0;
       const falta = round2(obj - saldo);
-      let plan = "";
-      if (falta > 0 && m.fecha_meta) {
-        const q = Math.max(1, Math.ceil(daysBetween(today(), parseISO(m.fecha_meta)) / 15.22));
-        plan = daysBetween(today(), parseISO(m.fecha_meta)) < 0
-          ? `<span class="warn">La fecha (${longDate(m.fecha_meta)}) ya pasó</span>`
-          : `Para el ${longDate(m.fecha_meta)}: aparta <b>${fmt(falta / q)}</b> por quincena (${q})`;
+      const ritmo = ritmoMeta(m);
+      const nec = aporteNecesario(m);
+      const lines = [];
+      if (falta > 0) {
+        if (ritmo.monto > 0 || +m.rendimiento_pct > 0) {
+          const pr = proyectarMeta(m, ritmo.monto);
+          const atrasado = pr.ok && m.fecha_meta && fechaEn(pr.quincenas) > parseISO(m.fecha_meta);
+          lines.push(pr.ok
+            ? `A este ritmo (${fmt(ritmo.monto)}/quinc.${ritmo.fuente === "promedio" ? ", promedio" : ""}) llegas en <b>${pr.quincenas} quincenas</b> ≈ ${monthYear(fechaEn(pr.quincenas))}${atrasado ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
+            : `<span class="warn">A este ritmo no llegas a la meta</span>`);
+        } else lines.push(`<span class="muted">Aún no hay aportes: define un aporte por quincena o vincula un gasto.</span>`);
+        if (m.fecha_meta) {
+          lines.push(nec == null
+            ? `<span class="warn">La fecha (${longDate(m.fecha_meta)}) ya pasó</span>`
+            : `Para el ${longDate(m.fecha_meta)}: aparta <b>${fmt(nec)}</b> por quincena (${quincenasHasta(m.fecha_meta)})`);
+        }
       }
       const movs = [
-        ...S.metaMovs.filter((x) => x.meta_id === m.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Retiro" : "Aporte"), m: +x.monto })),
+        ...S.metaMovs.filter((x) => x.meta_id === m.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Retiro" : "Aporte"), m: +x.monto, movId: x.id })),
         ...S.gastos.filter((g) => g.meta_id === m.id && g.pagado).map((g) => ({ t: byId("periodos", g.periodo_id)?.fecha ?? g.created_at, label: "Aporte · " + pName(g.periodo_id), m: +g.monto })),
       ].sort((a, b) => String(b.t).localeCompare(String(a.t)));
+      const rend = +m.rendimiento_pct;
       return `
       <div class="card deuda" data-id="${m.id}">
         <div class="deuda-top">
@@ -627,18 +693,42 @@
         <div class="deuda-meta">
           <span>${pct.toFixed(0)}% de ${fmt(obj)}</span>
           <span>${falta > 0 ? `Faltan ${fmt(falta)}` : "<b class='pos'>¡Meta lograda! 🎉</b>"}</span>
-          ${plan ? `<span>${plan}</span>` : ""}
+          ${+m.aporte_quincenal > 0 ? `<span>Aporte ${fmt(+m.aporte_quincenal)}/quinc.</span>` : ""}
+          ${rend ? `<span>Rendimiento ${rend}% mensual</span>` : ""}
         </div>
+        ${lines.length ? `<div class="meta-plan">${lines.map((l) => `<span>${l}</span>`).join("")}</div>` : ""}
         <div class="deuda-actions">
+          ${rend ? `<button class="btn sm" type="button" data-act="rend">+ Rendimiento ${rend}%</button>` : ""}
           <button class="btn sm" type="button" data-act="mov">± Aporte / retiro</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
+        ${falta > 0 && (ritmo.monto > 0 || rend > 0) ? `<details class="proj" data-meta="${m.id}" ${metasAbiertas.has(m.id) ? "open" : ""}><summary>Ver proyección</summary><div class="chart"></div></details>` : ""}
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
-          ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="${x.m < 0 ? "neg" : "pos"}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span></div>`).join("")}
+          ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="mov-amt"><span class="${x.m < 0 ? "neg" : "pos"}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span>${x.movId ? `<button class="mov-del" type="button" data-act="del-mov" data-mov="${x.movId}" title="Eliminar movimiento" aria-label="Eliminar movimiento">✕</button>` : ""}</span></div>`).join("")}
         </div></details>` : ""}
       </div>`;
     }).join("");
+    $$("#metaList details.proj[open]").forEach(drawProyeccion);
   }
+
+  function drawProyeccion(det) {
+    const m = byId("metas", det.dataset.meta);
+    if (!m) return;
+    const pr = proyectarMeta(m, ritmoMeta(m).monto);
+    lineChart($(".chart", det), {
+      labels: pr.serie.map((_, i) => (i === 0 ? "Hoy" : `Q${i} · ${monthYear(fechaEn(i))}`)),
+      xTicks: (i) => (i === 0 ? "Hoy" : monthYear(fechaEn(i))),
+      series: [{ name: "Ahorro proyectado", color: "--series-1", values: pr.serie }],
+      target: { value: +m.objetivo, label: "Meta " + fmt0(+m.objetivo) },
+    });
+  }
+  // "toggle" no burbujea: se escucha en captura
+  $("#metaList").addEventListener("toggle", (e) => {
+    const det = e.target;
+    if (!det.matches?.("details.proj")) return;
+    if (det.open) { metasAbiertas.add(det.dataset.meta); drawProyeccion(det); }
+    else metasAbiertas.delete(det.dataset.meta);
+  }, true);
 
   // ---------- Gráficas (SVG propio, sin librerías) ----------
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -708,12 +798,15 @@
   }
 
   // Líneas con cruz al pasar; la primera serie lleva relleno suave si es la única
-  function lineChart(el, { labels, series, xTicks }) {
+  // target: línea de referencia horizontal opcional { value, label }
+  function lineChart(el, { labels, series, xTicks, target }) {
     const n = labels.length;
     if (n < 2) { el.innerHTML = `<p class="muted small">Se necesitan al menos dos quincenas.</p>`; return; }
-    const max = Math.max(...series.flatMap((s) => s.values.filter((v) => v != null)));
+    const max = Math.max(...series.flatMap((s) => s.values.filter((v) => v != null)), target?.value ?? 0);
     const F = frame(el, max);
     const x = (i) => F.m.l + (F.pw * i) / (n - 1);
+    const ref = target ? `<line x1="${F.m.l}" x2="${F.W - F.m.r}" y1="${F.y(target.value)}" y2="${F.y(target.value)}" stroke="${css("--text")}" stroke-width="1" opacity=".45"/>
+      <text x="${F.W - F.m.r}" y="${F.y(target.value) - 5}" text-anchor="end" class="tick ref">${esc(target.label)}</text>` : "";
     const every = tickEvery(n, F.pw, 80);
     let paths = "", ticks = "", dots = "";
     series.forEach((s) => {
@@ -729,7 +822,7 @@
       const anchor = i === 0 ? "start" : "middle";
       ticks += `<text x="${x(i)}" y="${F.H - 6}" text-anchor="${anchor}" class="tick">${esc(xTicks ? xTicks(i) : labels[i])}</text>`;
     }
-    el.innerHTML = `<svg viewBox="0 0 ${F.W} ${F.H}" width="100%" height="${F.H}" role="img" aria-label="${esc(series.map((s) => s.name).join(" y "))}">${F.g}${paths}${ticks}
+    el.innerHTML = `<svg viewBox="0 0 ${F.W} ${F.H}" width="100%" height="${F.H}" role="img" aria-label="${esc(series.map((s) => s.name).join(" y "))}">${F.g}${ref}${paths}${ticks}
       <line class="xhair" y1="${F.m.t}" y2="${F.m.t + F.ph}" stroke="${css("--muted")}" stroke-width="1" opacity="0"/>
       ${series.map((s) => `<circle class="hdot" r="4" fill="${css(s.color)}" stroke="${css("--surface")}" stroke-width="2" opacity="0"/>`).join("")}
       ${dots}<rect x="${F.m.l}" y="${F.m.t}" width="${F.pw}" height="${F.ph}" fill="transparent" class="hit-all"/></svg>`;
@@ -804,6 +897,21 @@
       });
     } else $("#chartDeuda").innerHTML = `<p class="muted small">No tienes deudas registradas.</p>`;
 
+    // Ahorro de todas las metas al cierre de cada quincena
+    const ahorroEn = (fecha) => sum(S.metas, (m) => {
+      const movs = sum(S.metaMovs.filter((x) => x.meta_id === m.id && x.created_at.slice(0, 10) <= fecha), (x) => x.monto);
+      const aportes = sum(S.gastos.filter((g) => g.meta_id === m.id && g.pagado && (byId("periodos", g.periodo_id)?.fecha ?? "") <= fecha), (g) => g.monto);
+      return +m.saldo_inicial + movs + aportes;
+    });
+    $("#ahorroCard").classList.toggle("hidden", !S.metas.length);
+    if (S.metas.length) {
+      lineChart($("#chartAhorro"), {
+        labels: rows.map((x) => x.p.nombre),
+        xTicks: (i) => shortDate(rows[i].p.fecha),
+        series: [{ name: "Ahorro total", color: "--series-1", values: rows.map((x) => round2(ahorroEn(x.p.fecha))) }],
+      });
+    }
+
     const ids = new Set(ps.map((p) => p.id));
     const gs = S.gastos.filter((g) => ids.has(g.periodo_id) && +g.monto > 0);
     const porCat = {};
@@ -850,7 +958,11 @@
   });
 
   let resizeT;
-  const redrawCharts = () => { if (S.tab === "reportes") renderReportes(); if (S.tab === "deudas") renderSim(); };
+  const redrawCharts = () => {
+    if (S.tab === "reportes") renderReportes();
+    if (S.tab === "deudas") renderSim();
+    if (S.tab === "ahorro") $$("#metaList details.proj[open]").forEach(drawProyeccion);
+  };
   window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(redrawCharts, 150); });
   window.addEventListener("themechange", redrawCharts);
 
@@ -863,6 +975,7 @@
     window.scrollTo({ top: 0 });
     if (tab === "reportes") renderReportes();
     if (tab === "deudas") renderSim();
+    if (tab === "ahorro") $$("#metaList details.proj[open]").forEach(drawProyeccion);
   }
   $("#bottomNav").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
@@ -906,6 +1019,12 @@
     if (a.dataset.action === "edit-period") openPeriod(current());
     if (a.dataset.action === "mark-all") markAllPaid();
     if (a.dataset.action === "new-meta") openMeta();
+    if (a.dataset.action === "add-aporte") {
+      const m = byId("metas", a.dataset.meta);
+      if (!m || !current()) return;
+      db.insert("gastos", nuevoAporte(m, +a.dataset.monto, current().id, Math.max(0, ...gastosDe(current().id).map((g) => g.orden)) + 1));
+      render(); toast(`Aporte a ${m.nombre} agregado`);
+    }
   });
 
   // ---------- Salario ----------
@@ -1003,6 +1122,11 @@
     if (!g || !confirm(`¿Eliminar "${g.descripcion}"?`)) return;
     db.remove("gastos", g.id);
     gastoDialog.close(); render();
+  });
+
+  const nuevoAporte = (m, monto, periodo_id, orden) => ({
+    periodo_id, descripcion: m.nombre, monto: round2(monto), meta_id: m.id, deuda_id: null,
+    categoria: "ahorro", fijo: false, vence: null, pagado: false, orden,
   });
 
   function markAllPaid() {
@@ -1107,8 +1231,15 @@
           vence: g.vence ? addDays(g.vence, delta) : null, pagado: false, orden: i + 1,
         })));
       }
+      // Aporte planeado de cada meta (si no venía ya en los gastos copiados)
+      const yaVinculadas = new Set(copyFrom.map((g) => g.meta_id).filter(Boolean));
+      const aportes = S.metas
+        .filter((m) => +m.aporte_quincenal > 0 && !yaVinculadas.has(m.id) && saldoMeta(m) < +m.objetivo)
+        .map((m, i) => nuevoAporte(m, Math.min(+m.aporte_quincenal, round2(+m.objetivo - saldoMeta(m))), ins.id, copyFrom.length + i + 1));
+      if (aportes.length) db.insert("gastos", aportes);
       S.currentId = ins.id;
-      toast(copyFrom.length ? `Quincena creada con ${copyFrom.length} gasto(s)` : "Quincena creada");
+      const n = copyFrom.length + aportes.length;
+      toast(n ? `Quincena creada con ${n} gasto(s)${aportes.length ? ` (${aportes.length} aporte(s) a metas)` : ""}` : "Quincena creada");
     }
     render(); setTab("periodo");
   });
@@ -1229,13 +1360,18 @@
     metaForm.objetivo.value = m ? +m.objetivo : "";
     metaForm.saldo_inicial.value = m ? +m.saldo_inicial || "" : "";
     metaForm.fecha_meta.value = m?.fecha_meta ?? "";
+    metaForm.aporte_quincenal.value = m?.aporte_quincenal ?? "";
+    metaForm.rendimiento_pct.value = m ? +m.rendimiento_pct || "" : "";
     metaDialog.showModal();
   }
   metaForm.addEventListener("submit", (e) => {
     if (e.submitter?.value !== "ok") return;
-    const objetivo = parseNum(metaForm.objetivo.value), ini = parseNum(metaForm.saldo_inicial.value);
-    if (objetivo == null || Number.isNaN(objetivo) || Number.isNaN(ini)) { e.preventDefault(); toast("Revisa los montos"); return; }
-    const row = { nombre: metaForm.nombre.value.trim(), objetivo, saldo_inicial: ini ?? 0, fecha_meta: metaForm.fecha_meta.value || null };
+    const [objetivo, ini, aporte, rend] = ["objetivo", "saldo_inicial", "aporte_quincenal", "rendimiento_pct"].map((k) => parseNum(metaForm[k].value));
+    if (objetivo == null || [objetivo, ini, aporte, rend].some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
+    const row = {
+      nombre: metaForm.nombre.value.trim(), objetivo, saldo_inicial: ini ?? 0, fecha_meta: metaForm.fecha_meta.value || null,
+      aporte_quincenal: aporte > 0 ? aporte : null, rendimiento_pct: rend ?? 0,
+    };
     if (editingMetaId && byId("metas", editingMetaId)) db.update("metas", editingMetaId, row);
     else db.insert("metas", row);
     render();
@@ -1256,6 +1392,19 @@
     const m = byId("metas", card.dataset.id);
     if (act === "edit") return openMeta(m);
     if (act === "mov") openCargo("Movimiento en " + m.nombre, { table: "meta_movs", field: "meta_id", id: m.id }, "Positivo aporta, negativo retira");
+    if (act === "rend") {
+      const monto = round2((saldoMeta(m) * +m.rendimiento_pct) / 100);
+      if (monto <= 0) return toast("No hay saldo para calcular rendimiento");
+      if (!confirm(`Sumar ${+m.rendimiento_pct}% de rendimiento (${fmt(monto)}) a ${m.nombre}?`)) return;
+      db.insert("meta_movs", { meta_id: m.id, monto, nota: `Rendimiento ${+m.rendimiento_pct}%` });
+      render(); toast("Rendimiento sumado");
+    }
+    if (act === "del-mov") {
+      const x = byId("metaMovs", e.target.closest("[data-mov]").dataset.mov);
+      if (!x || !confirm(`¿Eliminar "${x.nota || (x.monto < 0 ? "Retiro" : "Aporte")}" (${fmt(+x.monto)}) de ${m.nombre}?`)) return;
+      db.remove("meta_movs", x.id);
+      render(); toast("Movimiento eliminado");
+    }
   });
 
   // Cerrar diálogos tocando el fondo
