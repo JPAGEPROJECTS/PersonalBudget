@@ -1145,6 +1145,7 @@
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     menu.style.top = r.bottom + 6 + "px";
+    menu.style.right = Math.max(8, document.documentElement.clientWidth - r.right) + "px";
     menu.classList.toggle("hidden");
   });
   document.addEventListener("click", (e) => {
