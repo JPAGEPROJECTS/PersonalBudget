@@ -174,7 +174,10 @@ label.check input { width: 22px; height: 22px; min-height: 0; accent-color: var(
 .deuda-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .progress.meta > div { background: var(--primary); }
 .movs { font-size: .85rem; display: grid; gap: 4px; max-height: 180px; overflow: auto; }
-.movs div { display: flex; justify-content: space-between; gap: 8px; border-top: 1px dashed var(--border); padding-top: 4px; }
+.movs div { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px dashed var(--border); padding-top: 4px; }
+.mov-amt { display: flex; align-items: center; gap: 6px; }
+.mov-del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: .8rem; padding: 4px 6px; line-height: 1; border-radius: 6px; }
+.mov-del:hover, .mov-del:focus-visible { color: var(--neg); }
 details summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
 
 /* ---------- Historial ---------- */
