@@ -1106,6 +1106,7 @@
   // ---------- Navegación ----------
   function setTab(tab) {
     S.tab = tab;
+    document.body.dataset.tab = tab;
     hideTip();
     $$(".tab").forEach((t) => t.classList.toggle("hidden", t.id !== "tab-" + tab));
     $$("#bottomNav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
@@ -1138,6 +1139,7 @@
     if (S.tab === "reportes" || !current()) return openPeriod();
     openGasto();
   });
+  $("#addGastoBtn").addEventListener("click", () => openGasto());
 
   // Menú de quincena
   const menu = $("#menuSheet");

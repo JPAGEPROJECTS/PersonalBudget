@@ -391,6 +391,15 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
   .bottom-nav button:hover { color: var(--text); }
 }
 
+/* ---------- Quincena: orden en móvil (resumen, gastos, ingresos) ---------- */
+.desk-only { display: none; }
+.period-grid { display: flex; flex-direction: column; }
+.period-side { display: contents; }
+.period-summary { order: 1; }
+.period-gastos { order: 2; }
+.period-ingresos { order: 3; }
+.hero { background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 10%, var(--surface)), var(--surface) 65%); }
+
 /* ---------- Tableta ---------- */
 @media (min-width: 760px) {
   .view { max-width: 920px; padding-inline: 24px; }
@@ -424,18 +433,43 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
   .fab { right: 32px; bottom: 32px; }
   .toast { bottom: 32px; left: calc(50% + var(--side-w) / 2); }
 
-  .period-bar select { max-width: 420px; }
-  .period-grid {
-    display: grid; gap: 0 24px; align-items: start;
-    grid-template-columns: minmax(320px, 380px) 1fr;
-    grid-template-rows: auto 1fr;
-    grid-template-areas: "summary gastos" "ingresos gastos";
-  }
-  .period-summary { grid-area: summary; }
-  .period-gastos { grid-area: gastos; }
-  .period-ingresos { grid-area: ingresos; }
-  .period-summary .stats:not(.three) { grid-template-columns: 1fr 1fr; margin-bottom: 0; }
-  .period-ingresos .list-head { margin-top: 22px; }
 
-  .hero-amount { font-size: 2.4rem; }
+  /* Quincena: resumen fijo a la izquierda, gastos en un panel a la derecha */
+  .desk-only { display: inline-flex; align-items: center; }
+  .period-bar select { max-width: 420px; }
+  .alerts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 8px; margin-bottom: 20px; }
+  .period-grid {
+    display: grid; gap: 24px; align-items: start;
+    grid-template-columns: 360px minmax(0, 1fr);
+  }
+  .period-side {
+    display: flex; flex-direction: column; gap: 16px;
+    position: sticky; top: 84px;
+    max-height: calc(100dvh - 104px); overflow-y: auto; scrollbar-width: thin;
+    padding: 2px; margin: -2px;
+  }
+  .period-summary .stats:not(.three) { grid-template-columns: 1fr 1fr; margin: 12px 0 0; }
+  .hero { padding: 20px; }
+  .hero-amount { font-size: 2.6rem; }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .panel .list-head, .panel .list-head.section-gap {
+    margin: 0; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface-2) 50%, var(--surface));
+  }
+  .panel .list { gap: 0; }
+  .panel .item {
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+    background: transparent; min-height: 58px; padding: 10px 18px;
+  }
+  .panel .item:last-child { border-bottom: 0; }
+  .panel .item:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  .panel > p { margin: 0; padding: 18px; }
+  .panel .list:empty { display: none; }
+  .period-gastos .amt { font-size: 1.05rem; }
+  body[data-tab="periodo"] .fab { display: none; }  /* ya hay "+ Agregar" en el panel */
+
 }

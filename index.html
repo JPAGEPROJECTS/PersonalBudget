@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -61,49 +61,54 @@
         <div id="alerts" class="alerts hidden"></div>
 
         <div class="period-grid">
-        <div class="period-summary">
-        <div class="card hero">
-          <div class="hero-row">
-            <span class="label">Balance restante</span>
-            <span id="balance" class="hero-amount">$0.00</span>
+          <aside class="period-side">
+            <div class="period-summary">
+              <div class="card hero">
+                <div class="hero-row">
+                  <span class="label">Balance restante</span>
+                  <span id="balance" class="hero-amount">$0.00</span>
+                </div>
+                <div class="progress" aria-hidden="true"><div id="progressBar"></div></div>
+                <div class="hero-sub">
+                  <span id="paidCount">0 de 0 pagados</span>
+                  <span id="afterAll" class="muted"></span>
+                </div>
+              </div>
+
+              <div class="stats">
+                <label class="stat salary">
+                  <span class="label">Salario</span>
+                  <input id="salaryInput" type="text" inputmode="decimal" autocomplete="off" aria-label="Salario quincenal">
+                </label>
+                <div class="stat"><span class="label">Ingresos extra</span><strong id="totalExtra">$0.00</strong></div>
+                <div class="stat"><span class="label">Total gastos</span><strong id="totalGastos">$0.00</strong></div>
+                <div class="stat"><span class="label">Pagado</span><strong id="totalPagado" class="pos">$0.00</strong></div>
+                <div class="stat"><span class="label">Pendiente</span><strong id="totalPendiente" class="warn">$0.00</strong></div>
+                <div class="stat"><span class="label">Ahorrado</span><strong id="totalAhorro">$0.00</strong></div>
+              </div>
+            </div>
+
+            <div class="period-ingresos panel">
+              <div class="list-head section-gap">
+                <h2>Ingresos extra</h2>
+                <button id="addIngresoBtn" class="chip" type="button">+ Agregar</button>
+              </div>
+              <ul id="ingresoList" class="list"></ul>
+              <p id="noIngresos" class="muted small">Bonos, ventas u otros ingresos de esta quincena.</p>
+            </div>
+          </aside>
+
+          <div class="period-gastos panel">
+            <div class="list-head">
+              <h2>Gastos</h2>
+              <span class="head-right">
+                <button id="hidePaidBtn" class="chip" type="button" aria-pressed="false">Ocultar pagados</button>
+                <button id="addGastoBtn" class="chip desk-only" type="button">+ Agregar</button>
+              </span>
+            </div>
+            <ul id="gastoList" class="list"></ul>
+            <p id="noGastos" class="muted center hidden">Sin gastos. Toca <b>+</b> para agregar.</p>
           </div>
-          <div class="progress" aria-hidden="true"><div id="progressBar"></div></div>
-          <div class="hero-sub">
-            <span id="paidCount">0 de 0 pagados</span>
-            <span id="afterAll" class="muted"></span>
-          </div>
-        </div>
-
-        <div class="stats">
-          <label class="stat salary">
-            <span class="label">Salario</span>
-            <input id="salaryInput" type="text" inputmode="decimal" autocomplete="off" aria-label="Salario quincenal">
-          </label>
-          <div class="stat"><span class="label">Ingresos extra</span><strong id="totalExtra">$0.00</strong></div>
-          <div class="stat"><span class="label">Total gastos</span><strong id="totalGastos">$0.00</strong></div>
-          <div class="stat"><span class="label">Pagado</span><strong id="totalPagado" class="pos">$0.00</strong></div>
-          <div class="stat"><span class="label">Pendiente</span><strong id="totalPendiente" class="warn">$0.00</strong></div>
-          <div class="stat"><span class="label">Ahorrado</span><strong id="totalAhorro">$0.00</strong></div>
-        </div>
-        </div>
-
-        <div class="period-gastos">
-        <div class="list-head">
-          <h2>Gastos</h2>
-          <button id="hidePaidBtn" class="chip" type="button" aria-pressed="false">Ocultar pagados</button>
-        </div>
-        <ul id="gastoList" class="list"></ul>
-        <p id="noGastos" class="muted center hidden">Sin gastos. Toca <b>+</b> para agregar.</p>
-        </div>
-
-        <div class="period-ingresos">
-        <div class="list-head section-gap">
-          <h2>Ingresos extra</h2>
-          <button id="addIngresoBtn" class="chip" type="button">+ Agregar</button>
-        </div>
-        <ul id="ingresoList" class="list"></ul>
-        <p id="noIngresos" class="muted small">Bonos, ventas u otros ingresos de esta quincena.</p>
-        </div>
         </div>
       </div>
     </section>
@@ -361,7 +366,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="config.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
