@@ -25,7 +25,7 @@ Un gasto vinculado a una deuda (campo *Abono a deuda / aporte a meta*) reduce el
 ### Deudas
 - **Día de corte, día de pago y pago mínimo**, con aviso cuando el pago está a ≤ 5 días.
 - **Uso del crédito** (saldo ÷ límite) por tarjeta y en total, con marca en 30 %.
-- **Te deben**: dinero que prestaste, por persona. Sube con *+ Le presté* o con un gasto vinculado al préstamo, y baja con *✓ Me devolvió* o con un ingreso extra marcado como devolución.
+- **Te deben**: dinero que prestaste, por persona. Sube con *+ Le presté* o con un gasto vinculado al préstamo, y baja con *✓ Me devolvió* o con un ingreso extra marcado como devolución. Cada préstamo guarda la **fecha en que prestaste** y la **fecha en que debe pagarte**: avisa cuando faltan ≤ 3 días o ya está atrasado, y muestra los **días sin abonar** (con aviso desde 30 días si no hay fecha acordada).
 - **Plan para salir de deudas**: con lo que pagas por quincena compara *avalancha* (primero la de mayor interés) y *bola de nieve* (primero la de menor saldo): cuántas quincenas tardas, cuánto interés pagas, en qué orden se liquidan y una gráfica del saldo proyectado. El interés puede ser mensual o quincenal.
 
 ### Ahorro

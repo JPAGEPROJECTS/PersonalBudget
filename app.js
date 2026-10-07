@@ -155,6 +155,23 @@
     const devuelto = sum(S.ingresos.filter((i) => i.prestamo_id === pr.id), (i) => i.monto);
     return round2(+pr.saldo_inicial + movs + prestado - devuelto);
   }
+  // Fechas de un préstamo: días sin abonar (desde la última devolución o desde
+  // que prestaste) y días que faltan para la fecha acordada (negativo = atrasado)
+  function prestamoInfo(pr) {
+    const saldo = saldoPrestamo(pr);
+    const fechaDe = (pid, alt) => byId("periodos", pid)?.fecha ?? alt.slice(0, 10);
+    const abonos = [
+      ...S.prestamoMovs.filter((x) => x.prestamo_id === pr.id && +x.monto < 0).map((x) => x.created_at.slice(0, 10)),
+      ...S.ingresos.filter((i) => i.prestamo_id === pr.id).map((i) => fechaDe(i.periodo_id, i.created_at)),
+    ].sort();
+    const ultimo = abonos.at(-1) ?? null;
+    const desde = ultimo ?? pr.fecha ?? pr.created_at.slice(0, 10);
+    return {
+      saldo, ultimo,
+      sinAbonar: Math.max(0, daysBetween(parseISO(desde), today())),
+      vence: pr.fecha_pago && saldo > 0 ? daysBetween(today(), parseISO(pr.fecha_pago)) : null,
+    };
+  }
   function saldoMeta(m) {
     const movs = sum(S.metaMovs.filter((x) => x.meta_id === m.id), (x) => x.monto);
     const aportes = sum(S.gastos.filter((g) => g.meta_id === m.id && g.pagado), (g) => g.monto);
@@ -298,6 +315,7 @@
       sb.from("deudas").select("id,dia_pago,interes_frec").limit(1),
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
       sb.from("ingresos").select("id,prestamo_id").limit(1),
+      sb.from("prestamos").select("id,fecha,fecha_pago").limit(1),
     ]);
     const bad = results.find((r) => r.error);
     if (bad) return { error: bad.error, status: bad.status };
@@ -376,6 +394,17 @@
     S.deudas.forEach((d) => {
       const pi = deudaPagoInfo(d);
       if (pi?.alert) items.push({ cls: pi.n <= 1 ? "neg" : "warn", html: `💳 <b>${esc(d.nombre)}</b>: ${pi.txt} (día ${d.dia_pago})${d.pago_minimo ? ` · mínimo ${fmt(+d.pago_minimo)}` : ""}` });
+    });
+    // Préstamos (solo en la quincena más reciente): fecha acordada cerca o vencida, o 30+ días sin abonar
+    if (p.id === S.periodos[0]?.id) S.prestamos.forEach((pr) => {
+      const i = prestamoInfo(pr);
+      if (i.saldo <= 0) return;
+      const quien = `🤝 <b>${esc(pr.nombre)}</b> te debe ${fmt(i.saldo)}`;
+      if (i.vence != null && i.vence <= 3) {
+        items.push({ cls: i.vence < 0 ? "neg" : "warn", icon: "⏰", html: `${quien}: ${i.vence < 0 ? `debía pagarte hace ${-i.vence} día${i.vence === -1 ? "" : "s"} (${longDate(pr.fecha_pago)})` : `debe pagarte ${enDias(i.vence)}`}` });
+      } else if (i.sinAbonar >= 30) {
+        items.push({ cls: "info", icon: "⏳", html: `${quien} · ${i.sinAbonar} días sin abonar` });
+      }
     });
     // Metas: solo en la quincena más reciente, si lo planeado no alcanza el ritmo necesario
     if (p.id === S.periodos[0]?.id) S.metas.forEach((m) => {
@@ -531,7 +560,8 @@
     const pName = (id) => byId("periodos", id)?.nombre ?? "";
     const pFecha = (id, alt) => byId("periodos", id)?.fecha ?? alt;
     $("#prestamoList").innerHTML = ps.map((pr) => {
-      const saldo = saldoPrestamo(pr);
+      const info = prestamoInfo(pr);
+      const saldo = info.saldo;
       const movs = [
         ...S.prestamoMovs.filter((x) => x.prestamo_id === pr.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Me devolvió" : "Le presté"), m: +x.monto, movId: x.id })),
         ...S.gastos.filter((g) => g.prestamo_id === pr.id && g.pagado).map((g) => ({ t: pFecha(g.periodo_id, g.created_at), label: "Le presté · " + pName(g.periodo_id), m: +g.monto })),
@@ -543,7 +573,12 @@
           <h2>${esc(pr.nombre)}</h2>
           <span class="deuda-saldo ${saldo <= 0 ? "pos" : ""}">${saldo <= 0 ? "Al día ✓" : fmt(saldo)}</span>
         </div>
-        ${pr.nota ? `<div class="deuda-meta"><span>${esc(pr.nota)}</span></div>` : ""}
+        <div class="deuda-meta">
+          ${pr.nota ? `<span>${esc(pr.nota)}</span>` : ""}
+          ${pr.fecha ? `<span>Prestado el ${longDate(pr.fecha)}</span>` : ""}
+          ${pr.fecha_pago ? `<span>Debe pagarte el ${longDate(pr.fecha_pago)}${info.vence != null ? ` <b class="${info.vence < 0 ? "neg" : info.vence <= 3 ? "warn" : ""}">(${info.vence < 0 ? `atrasado ${-info.vence} día${info.vence === -1 ? "" : "s"}` : enDias(info.vence)})</b>` : ""}</span>` : ""}
+          ${saldo > 0 ? `<span class="${info.sinAbonar >= 30 ? "warn" : ""}">${info.sinAbonar} día${info.sinAbonar === 1 ? "" : "s"} sin abonar${info.ultimo ? ` (último: ${longDate(info.ultimo)})` : ""}</span>` : ""}
+        </div>
         <div class="deuda-actions">
           <button class="btn sm" type="button" data-act="presto">+ Le presté</button>
           <button class="btn sm" type="button" data-act="devolvio">✓ Me devolvió</button>
@@ -1550,6 +1585,8 @@
     prestamoForm.nombre.value = pr?.nombre ?? "";
     prestamoForm.saldo_inicial.value = pr ? +pr.saldo_inicial || "" : "";
     prestamoForm.nota.value = pr?.nota ?? "";
+    prestamoForm.fecha.value = pr ? pr.fecha ?? "" : iso(today());
+    prestamoForm.fecha_pago.value = pr?.fecha_pago ?? "";
     prestamoDialog.showModal();
   }
   $("#addPrestamoBtn").addEventListener("click", () => openPrestamo());
@@ -1557,7 +1594,10 @@
     if (e.submitter?.value !== "ok") return;
     const ini = parseNum(prestamoForm.saldo_inicial.value);
     if (Number.isNaN(ini)) { e.preventDefault(); toast("Monto inválido"); return; }
-    const row = { nombre: prestamoForm.nombre.value.trim(), saldo_inicial: ini ?? 0, nota: prestamoForm.nota.value.trim() || null };
+    const row = {
+      nombre: prestamoForm.nombre.value.trim(), saldo_inicial: ini ?? 0, nota: prestamoForm.nota.value.trim() || null,
+      fecha: prestamoForm.fecha.value || null, fecha_pago: prestamoForm.fecha_pago.value || null,
+    };
     if (editingPrestamoId && byId("prestamos", editingPrestamoId)) db.update("prestamos", editingPrestamoId, row);
     else db.insert("prestamos", row);
     render();

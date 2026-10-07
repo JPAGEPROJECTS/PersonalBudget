@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <header class="topbar">
@@ -313,6 +313,10 @@
       <h3 id="prestamoTitle">Nuevo préstamo</h3>
       <label>Persona<input name="nombre" required maxlength="40" autocomplete="off" placeholder="Kevin"></label>
       <label>Te debe ahora<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+      <div class="grid2">
+        <label>Fecha del préstamo<input name="fecha" type="date"></label>
+        <label>Debe pagarte el (opcional)<input name="fecha_pago" type="date"></label>
+      </div>
       <label>Nota (opcional)<input name="nota" maxlength="80" placeholder="Para el pasaje…"></label>
       <p class="muted small" id="prestamoEditHint">Al editar, es el monto inicial; lo prestado y lo devuelto se suman/restan solos.</p>
       <div class="actions">
@@ -347,7 +351,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="config.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
