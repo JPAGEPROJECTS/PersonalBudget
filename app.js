@@ -409,15 +409,20 @@
     // Metas: solo en la quincena más reciente, si lo planeado no alcanza el ritmo necesario
     if (p.id === S.periodos[0]?.id) S.metas.forEach((m) => {
       const falta = round2(+m.objetivo - saldoMeta(m));
-      if (falta <= 0) return;
-      const nec = aporteNecesario(m);
+      const pat = patronMeta(m);
+      if (falta <= 0 || !tocaAbono(pat, p.fecha)) return;
+      // Lo que hace falta en cada aporte, contando esta quincena como si aún no tuviera aporte
+      const cal = calendarioMeta(m);
+      cal.reg = cal.reg.map((f) => (f.fecha === p.fecha ? { ...f, pago: null } : f));
+      const pf = m.fecha_meta ? aporteParaFecha(m, cal) : null;
+      const nec = pf && !pf.error ? pf.pago : null;
       const meta = nec ?? (+m.aporte_quincenal || 0);
       const planeado = round2(sum(gs.filter((g) => g.meta_id === m.id), (g) => g.monto));
       if (meta <= 0 || planeado >= meta - 0.5) return;
       const add = round2(Math.min(meta - planeado, falta));
       items.push({
         cls: "info", icon: "🐷",
-        html: `<b>${esc(m.nombre)}</b>: ${nec != null ? `para llegar al ${longDate(m.fecha_meta)} necesitas ${fmt(meta)} por quincena` : `tu aporte es de ${fmt(meta)}`}; ${planeado ? `tienes ${fmt(planeado)} planeado` : "no hay aporte en esta quincena"}.`,
+        html: `<b>${esc(m.nombre)}</b>: ${nec != null ? `para llegar al ${longDate(m.fecha_meta)} necesitas ${fmt(meta)} ${cadaTxt(pat)}` : `tu aporte es de ${fmt(meta)}`}; ${planeado ? `tienes ${fmt(planeado)} planeado` : "no hay aporte en esta quincena"}.`,
         btn: `<button class="btn sm" type="button" data-action="add-aporte" data-meta="${m.id}" data-monto="${add}">+ ${fmt(add)}</button>`,
       });
     });
@@ -704,13 +709,17 @@
     if (d.getDate() !== 15 && d.getDate() !== 30) d = new Date(d.getFullYear(), d.getMonth(), 0);
     return iso(d);
   };
-  // Abonos a la deuda que ya están en tus quincenas y aún no se pagan: se usan tal cual en el plan.
-  // El calendario arranca después de la última quincena con abono pagado (o en la última quincena si nunca se ha pagado).
-  function calendarioDeuda(d) {
-    const ps = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  // Gastos de una quincena vinculados a una deuda (deuda_id) o a una meta (meta_id)
+  const vinculados = (campo, id, p) => S.gastos.filter((g) => g.periodo_id === p.id && g[campo] === id);
+  const periodosAsc = () => [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+  // Abonos/aportes que ya están en tus quincenas y aún no se pagan: se usan tal cual en el plan.
+  // El calendario arranca después de la última quincena con pago hecho (o en la última quincena si nunca se ha pagado).
+  function calendarioDe(campo, id) {
+    const ps = periodosAsc();
     if (!ps.length) return { reg: [], next: nextQuincena().fecha };
     const filas = ps.map((p) => {
-      const gs = S.gastos.filter((g) => g.periodo_id === p.id && g.deuda_id === d.id);
+      const gs = vinculados(campo, id, p);
       return { p, pagado: sum(gs.filter((g) => g.pagado), (g) => g.monto), pendiente: round2(sum(gs.filter((g) => !g.pagado), (g) => g.monto)) };
     });
     const lastPaid = filas.filter((f) => f.pagado > 0).at(-1)?.p.fecha ?? null;
@@ -719,38 +728,39 @@
     const desde = lastPaid ?? (firstPend && firstPend < latest ? firstPend : latest);
     const reg = filas
       .filter((f) => (lastPaid ? f.p.fecha > lastPaid || (f.p.fecha === lastPaid && f.pendiente > 0) : f.p.fecha >= desde))
-      .map((f) => ({ fecha: f.p.fecha, pago: f.pendiente > 0 ? f.pendiente : null }));   // null: sin abono puesto, usa el del escenario
+      .map((f) => ({ fecha: f.p.fecha, pago: f.pendiente > 0 ? f.pendiente : null }));   // null: sin monto puesto, usa el del escenario
     return { reg, next: quincenaDespues(reg.at(-1)?.fecha ?? latest) };
   }
 
-  // Cada cuánto se abona a la deuda: cada quincena (mitad null) o una vez al mes, en la quincena del 15 (1) o del 30 (2).
-  // Manda el abono fijo marcado en tus quincenas ("cada quincena" / "cada mes"); si no hay, se deduce de las últimas quincenas.
-  function patronDeuda(d) {
-    const ps = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha));
-    const gs = (p) => S.gastos.filter((g) => g.periodo_id === p.id && g.deuda_id === d.id);
-    const conFijo = ps.filter((p) => gs(p).some((g) => g.fijo)).at(-1);
+  // Cada cuánto se paga: cada quincena (mitad null) o una vez al mes, en la quincena del 15 (1) o del 30 (2).
+  // Manda el gasto fijo marcado en tus quincenas ("cada quincena" / "cada mes"); si no hay, se deduce de las últimas quincenas.
+  function patronDe(campo, id) {
+    const ps = periodosAsc();
+    const conFijo = ps.filter((p) => vinculados(campo, id, p).some((g) => g.fijo)).at(-1);
     if (conFijo) {
-      const g = gs(conFijo).find((g) => g.fijo);
+      const g = vinculados(campo, id, conFijo).find((g) => g.fijo);
       return { mitad: g.frecuencia === "mensual" ? mitad(conFijo.fecha) : null, fuente: "fijo" };
     }
-    const conAbono = ps.slice(-6).filter((p) => gs(p).length);
-    const mitades = new Set(conAbono.map((p) => mitad(p.fecha)));
-    return { mitad: conAbono.length >= 2 && mitades.size === 1 ? [...mitades][0] : null, fuente: conAbono.length ? "historial" : null };
+    const conPago = ps.slice(-6).filter((p) => vinculados(campo, id, p).length);
+    const mitades = new Set(conPago.map((p) => mitad(p.fecha)));
+    return { mitad: conPago.length >= 2 && mitades.size === 1 ? [...mitades][0] : null, fuente: conPago.length ? "historial" : null };
   }
   const tocaAbono = (pat, fecha) => !pat.mitad || mitad(fecha) === pat.mitad;
   const cadaTxt = (pat) => (pat.mitad ? `al mes (quincena del ${pat.mitad === 1 ? "15" : "30"})` : "por quincena");
   const cadaCorto = (pat) => (pat.mitad ? "/mes" : "/quinc.");
 
-  // Monto de cada abono para las quincenas que aún no lo tienen: el planeado o, si no hay,
-  // el promedio de las últimas 6 quincenas que tienen abono (pagado o por pagar)
-  function ritmoDeuda(d) {
-    if (+d.pago_plan > 0) return { monto: +d.pago_plan, fuente: "plan" };
-    const vals = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha))
-      .map((p) => sum(S.gastos.filter((g) => g.periodo_id === p.id && g.deuda_id === d.id), (g) => g.monto))
-      .filter((v) => v > 0).slice(-6);
+  // Monto de cada pago para las quincenas que aún no lo tienen: el planeado o, si no hay,
+  // el promedio de las últimas 6 quincenas que tienen pago (hecho o por hacer)
+  function ritmoDe(campo, id, plan) {
+    if (+plan > 0) return { monto: +plan, fuente: "plan" };
+    const vals = periodosAsc().map((p) => sum(vinculados(campo, id, p), (g) => g.monto)).filter((v) => v > 0).slice(-6);
     if (!vals.length) return { monto: 0, fuente: "promedio" };
     return { monto: round2(sum(vals) / vals.length), fuente: "promedio" };
   }
+
+  const calendarioDeuda = (d) => calendarioDe("deuda_id", d.id);
+  const patronDeuda = (d) => patronDe("deuda_id", d.id);
+  const ritmoDeuda = (d) => ritmoDe("deuda_id", d.id, d.pago_plan);
 
   // Tabla de abonos: cada quincena se suma el interés y, si le toca abono según el patrón, se abona.
   // Las quincenas con abono puesto usan ese monto; las demás que tocan, el pago del escenario.
@@ -775,23 +785,26 @@
     return { ok: saldo <= 0.005, filas, abonos: filas.length, quincenas: n, interes: round2(interes), pagado: round2(pagado), fin: filas.at(-1)?.fecha };
   }
 
-  // Cuánto pagar en las quincenas sin abono puesto para terminar a más tardar en la fecha meta
-  function pagoParaFecha(d, fecha = d.fecha_meta) {
-    if (!fecha) return null;
-    const cal = calendarioDeuda(d);
-    const primera = cal.reg[0]?.fecha ?? cal.next;
-    if (fecha < primera) return { error: "pasada" };
-    if (saldoDeuda(d) <= 0) return { pago: 0, abonos: 0 };
-    const pat = patronDeuda(d);
-    const llega = (x) => { const r = proyectarDeuda(d, x, cal, pat); return r.ok && r.fin <= fecha ? r : null; };
+  // Cuánto pagar en las quincenas sin monto puesto para lograrlo a más tardar en la fecha.
+  // Búsqueda binaria sobre la proyección; hi es un pago que de seguro alcanza.
+  function buscarPago(fecha, cal, proyectar, hi) {
+    if (fecha < (cal.reg[0]?.fecha ?? cal.next)) return { error: "pasada" };
+    const llega = (x) => { const r = proyectar(x); return r.ok && r.fin <= fecha ? r : null; };
     const solo = llega(0);
     if (solo) return { pago: 0, abonos: solo.abonos };
-    let hi = saldoDeuda(d) * 2 + 1;
-    if (!llega(hi)) return { error: "registrado" };     // la fecha cae antes de terminar lo ya registrado
+    if (!llega(hi)) return { error: "registrado" };     // ni con un pago enorme se llega a tiempo
     let lo = 0;
     for (let n = 0; n < 40; n++) { const mid = (lo + hi) / 2; if (llega(mid)) hi = mid; else lo = mid; }
     const pago = Math.ceil(hi * 100) / 100;
     return { pago, abonos: llega(pago)?.abonos ?? 0 };
+  }
+
+  // Cuánto pagar en las quincenas sin abono puesto para terminar a más tardar en la fecha meta
+  function pagoParaFecha(d, fecha = d.fecha_meta) {
+    if (!fecha) return null;
+    if (saldoDeuda(d) <= 0) return { pago: 0, abonos: 0 };
+    const cal = calendarioDeuda(d), pat = patronDeuda(d);
+    return buscarPago(fecha, cal, (x) => proyectarDeuda(d, x, cal, pat), saldoDeuda(d) * 2 + 1);
   }
 
   const redondeoArriba = (v) => { const step = v < 100 ? 5 : v < 500 ? 10 : 50; return Math.ceil(v / step) * step; };
@@ -816,56 +829,80 @@
     return out.map((e) => ({ ...e, r: proyectarDeuda(d, e.pago, cal, pat) }));
   }
 
-  const deudaEsc = new Map();          // escenario elegido por deuda
-  const deudasAbiertas = new Set();    // planes desplegados (sobreviven al re-render)
+  // Textos del plan: deudas (abonos, interés) y metas (aportes, rendimiento)
+  const VOC = {
+    deuda: {
+      abono: "abono", Abono: "Abono", Verbo: "Abonas", pagar: "pagar", interes: "Interés", saldo: "Saldo", llegas: "Terminas", malo: true,
+      noOk: "No se termina: el interés es mayor que el pago",
+      vacio: "Define un <b>pago planeado</b> o una <b>fecha para terminar</b> en Editar y aquí verás el calendario de pagos.",
+      total: (r) => `Total a pagar <b>${fmt(r.pagado)}</b>, de los cuales <b class="${r.interes > 0 ? "warn" : ""}">${fmt(r.interes)}</b> son intereses.`,
+    },
+    meta: {
+      abono: "aporte", Abono: "Aporte", Verbo: "Aportas", pagar: "aportar", interes: "Rendimiento", saldo: "Ahorrado", llegas: "Llegas", malo: false, chart: true,
+      noOk: "No llegas a la meta con este aporte",
+      vacio: "Define un <b>aporte planeado</b> o una <b>fecha</b> en Editar y aquí verás el calendario de aportes.",
+      total: (r) => `Aportas <b>${fmt(r.pagado)}</b>${r.interes > 0 ? ` y ganas <b class="pos">${fmt(r.interes)}</b> de rendimiento` : ""}.`,
+    },
+  };
+  const abonosTxt = (v, n) => plural(n, v.abono);
 
-  function planDeudaHTML(d, escs) {
-    if (!escs.length) return `<p class="muted small">Define un <b>pago planeado</b> o una <b>fecha para terminar</b> en Editar y aquí verás el calendario de pagos.</p>`;
-    const sel = escs.find((e) => e.key === deudaEsc.get(d.id)) ?? escs[0];
+  const planEsc = new Map();           // escenario elegido por deuda o meta
+  const deudasAbiertas = new Set();    // planes desplegados (sobreviven al re-render)
+  const escElegido = (id, escs) => escs.find((e) => e.key === planEsc.get(id)) ?? escs[0];
+
+  // Escenarios, nota del patrón, tabla y (en metas) gráfica del escenario elegido
+  function planHTML(v, id, escs, pat, regs, conPlan) {
+    if (!escs.length) return `<p class="muted small">${v.vacio}</p>`;
+    const sel = escElegido(id, escs);
     const ref = escs[0];
-    const pat = patronDeuda(d);
-    const regs = calendarioDeuda(d).reg.filter((f) => f.pago != null);
     const cmp = (e) => {
       if (e === ref || !e.r.ok || !ref.r.ok) return "";
-      const dq = ref.r.quincenas - e.r.quincenas, di = round2(ref.r.interes - e.r.interes);
+      const dq = ref.r.quincenas - e.r.quincenas;
+      const di = round2(v.malo ? ref.r.interes - e.r.interes : e.r.interes - ref.r.interes);   // > 0: a tu favor
       const t = [dq > 0 ? `${quincTxt(dq)} antes` : dq < 0 ? `${quincTxt(-dq)} después` : "",
-        di > 0.5 ? `ahorras ${fmt(di)}` : di < -0.5 ? `${fmt(-di)} más de interés` : ""].filter(Boolean).join(" · ");
-      return t ? `<span class="small ${di > 0.5 || dq > 0 ? "pos" : "warn"}">${di > 0.5 || dq > 0 ? "✓" : "⚠️"} ${t}</span>` : "";
+        di > 0.5 ? (v.malo ? `ahorras ${fmt(di)}` : `${fmt(di)} más de rendimiento`)
+        : di < -0.5 ? (v.malo ? `${fmt(-di)} más de interés` : `${fmt(-di)} menos de rendimiento`) : ""].filter(Boolean).join(" · ");
+      const bien = di > 0.5 || dq > 0;
+      return t ? `<span class="small ${bien ? "pos" : "warn"}">${bien ? "✓" : "⚠️"} ${t}</span>` : "";
     };
     const card = (e) => `
       <button type="button" class="sim-opt ${e === sel ? "sel" : ""}" data-act="esc" data-esc="${e.key}" aria-pressed="${e === sel}">
         <span class="sim-title">${esc(e.title)}</span>
         <span class="muted small">${esc(e.sub)}</span>
         <strong>${regs.length ? `<span class="muted small">luego </span>` : ""}${fmt(e.pago)}<span class="muted small"> ${cadaCorto(pat)}</span></strong>
-        ${e.r.ok ? `<span class="small">Terminas ${monthYear(parseISO(e.r.fin))} · ${abonoTxt(e.r.abonos)}</span>
-        <span class="small">Interés: ${fmt(e.r.interes)}</span>${cmp(e)}`
-        : `<span class="neg small">No se termina: el interés es mayor que el pago</span>`}
+        ${e.r.ok ? `<span class="small">${v.llegas} ${monthYear(parseISO(e.r.fin))} · ${abonosTxt(v, e.r.abonos)}</span>
+        ${v.malo || e.r.interes > 0 ? `<span class="small">${v.interes}: ${fmt(e.r.interes)}</span>` : ""}${cmp(e)}`
+        : `<span class="neg small">${v.noOk}</span>`}
       </button>`;
+    const patNota = pat.mitad
+      ? `🔁 ${v.Verbo} <b>una vez al mes</b>, en la quincena del ${pat.mitad === 1 ? "15" : "30"}${pat.fuente === "fijo" ? ` (tu ${v.abono} fijo está marcado “cada mes”)` : " (como en tus últimas quincenas)"}.${v.malo ? " El interés de la otra quincena se suma al siguiente abono." : ""}`
+      : pat.fuente === "fijo" ? `🔁 ${v.Verbo} <b>cada quincena</b> (tu ${v.abono} fijo está marcado “cada quincena”).`
+      : pat.fuente === "historial" ? `🔁 ${v.Verbo} <b>cada quincena</b>, como en tus últimas quincenas.` : "";
     const r = sel.r;
     const MAXF = 120;
-    const usar = sel.key !== "plan" || ritmoDeuda(d).fuente !== "plan";
-    const patNota = pat.mitad
-      ? `🔁 Abonas <b>una vez al mes</b>, en la quincena del ${pat.mitad === 1 ? "15" : "30"}${pat.fuente === "fijo" ? " (tu abono fijo está marcado “cada mes”)" : " (como en tus últimas quincenas)"}. El interés de la otra quincena se suma al siguiente abono.`
-      : pat.fuente === "fijo" ? "🔁 Abonas <b>cada quincena</b> (tu abono fijo está marcado “cada quincena”)."
-      : pat.fuente === "historial" ? "🔁 Abonas <b>cada quincena</b>, como en tus últimas quincenas." : "";
+    const ult = r.filas.length - 1;
     return `
       ${patNota ? `<p class="small plan-nota">${patNota}</p>` : ""}
-      ${regs.length ? `<p class="small plan-nota">📝 Se ${regs.length === 1 ? "usa el <b>abono</b>" : `usan los <b>${regs.length} abonos</b>`} que ya pusiste en tus quincenas (${fmt(sum(regs, (f) => f.pago))}). Cada escenario dice cuánto pagar <b>en los abonos siguientes</b>.</p>` : ""}
+      ${regs.length ? `<p class="small plan-nota">📝 Se ${regs.length === 1 ? `usa el <b>${v.abono}</b>` : `usan los <b>${regs.length} ${v.abono}s</b>`} que ya pusiste en tus quincenas (${fmt(sum(regs, (f) => f.pago))}). Cada escenario dice cuánto ${v.pagar} <b>en los ${v.abono}s siguientes</b>.</p>` : ""}
       <div class="esc-grid">${escs.map(card).join("")}</div>
-      ${usar ? `<button type="button" class="btn sm primary" data-act="usar-plan" data-pago="${sel.pago}">Usar ${fmt(sel.pago)} ${cadaTxt(pat)} como mi plan</button>` : ""}
+      ${sel.key !== "plan" || !conPlan ? `<button type="button" class="btn sm primary" data-act="usar-plan" data-pago="${sel.pago}">Usar ${fmt(sel.pago)} ${cadaTxt(pat)} como mi plan</button>` : ""}
+      ${v.chart && r.serie?.length > 1 ? `<div class="chart"></div>` : ""}
       ${r.filas.length ? `
       <div class="plan-tabla">
         <table>
-          <thead><tr><th>Quincena</th><th>Pago</th><th>Interés</th><th>Saldo</th></tr></thead>
+          <thead><tr><th>Quincena</th><th>${v.Abono}</th><th>${v.interes}</th><th>${v.saldo}</th></tr></thead>
           <tbody>${r.filas.slice(0, MAXF).map((f, i) => `
-            <tr class="${r.ok && i === r.filas.length - 1 ? "fin" : ""}"><td>${longDate(f.fecha)}${f.reg ? ` <span title="Abono puesto en tu quincena">📝</span>` : ""}</td><td>${f.reg ? `<b>${fmt(f.pago)}</b>` : fmt(f.pago)}</td><td class="muted">${f.interes ? fmt(f.interes) : "—"}</td><td>${f.saldo > 0 ? fmt(f.saldo) : "<b class='pos'>$0 ✓</b>"}</td></tr>`).join("")}
+            <tr class="${r.ok && i === ult ? "fin" : ""}"><td>${longDate(f.fecha)}${f.reg ? ` <span title="Monto puesto en tu quincena">📝</span>` : ""}</td><td>${!f.pago ? "—" : f.reg ? `<b>${fmt(f.pago)}</b>` : fmt(f.pago)}</td><td class="muted">${f.interes ? fmt(f.interes) : "—"}</td><td>${r.ok && i === ult ? `<b class='pos'>${v.malo ? "$0" : fmt(f.saldo)} ✓</b>` : fmt(f.saldo)}</td></tr>`).join("")}
           </tbody>
         </table>
-        ${r.filas.length > MAXF ? `<p class="muted small">… y ${abonoTxt(r.filas.length - MAXF)} más.</p>` : ""}
+        ${r.filas.length > MAXF ? `<p class="muted small">… y ${abonosTxt(v, r.filas.length - MAXF)} más.</p>` : ""}
       </div>
       ${regs.length ? `<p class="muted small">📝 = monto que pusiste en esa quincena. Las demás usan ${fmt(sel.pago)}.</p>` : ""}
-      ${r.ok ? `<p class="small">Total a pagar <b>${fmt(r.pagado)}</b>, de los cuales <b class="${r.interes > 0 ? "warn" : ""}">${fmt(r.interes)}</b> son intereses.</p>` : ""}` : ""}`;
+      ${r.ok ? `<p class="small">${v.total(r)}</p>` : ""}` : ""}`;
   }
+
+  const planDeudaHTML = (d, escs) =>
+    planHTML(VOC.deuda, d.id, escs, patronDeuda(d), calendarioDeuda(d).reg.filter((f) => f.pago != null), ritmoDeuda(d).fuente === "plan");
 
   // Resumen corto del plan para la tarjeta de la deuda
   function planDeudaLineas(d) {
@@ -905,41 +942,86 @@
 
   // ---------- Metas de ahorro ----------
   const tasaMetaQ = (m) => Math.pow(1 + (+m.rendimiento_pct || 0) / 100, 0.5) - 1;   // % mensual -> por quincena
-  const quincenasHasta = (fecha) => Math.max(1, Math.ceil(daysBetween(today(), parseISO(fecha)) / 15.22));
+  const calendarioMeta = (m) => calendarioDe("meta_id", m.id);
+  const patronMeta = (m) => patronDe("meta_id", m.id);
+  const ritmoMeta = (m) => ritmoDe("meta_id", m.id, m.aporte_quincenal);
 
-  // Cuánto se aporta por quincena: el plan de la meta o, si no hay, el promedio
-  // de los aportes pagados en las últimas 6 quincenas (desde el primero que hubo)
-  function ritmoMeta(m) {
-    if (+m.aporte_quincenal > 0) return { monto: +m.aporte_quincenal, fuente: "plan" };
-    const ps = [...S.periodos].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(-6);
-    const porP = ps.map((p) => sum(S.gastos.filter((g) => g.periodo_id === p.id && g.meta_id === m.id && g.pagado), (g) => g.monto));
-    const first = porP.findIndex((v) => v > 0);
-    if (first < 0) return { monto: 0, fuente: "promedio" };
-    const vals = porP.slice(first);
-    return { monto: round2(sum(vals) / vals.length), fuente: "promedio" };
-  }
-
-  // Aporte necesario por quincena para llegar a la fecha (considera el rendimiento)
-  function aporteNecesario(m) {
-    if (!m.fecha_meta || daysBetween(today(), parseISO(m.fecha_meta)) < 0) return null;
-    const falta = +m.objetivo - saldoMeta(m);
-    if (falta <= 0) return 0;
-    const n = quincenasHasta(m.fecha_meta), r = tasaMetaQ(m), saldo = saldoMeta(m);
-    if (!r) return round2(falta / n);
-    const crec = Math.pow(1 + r, n);
-    return round2(Math.max(0, (+m.objetivo - saldo * crec) * r / (crec - 1)));
-  }
-
-  function proyectarMeta(m, aporte) {
+  // Tabla de aportes: cada quincena se suma el rendimiento y, si le toca aporte según el patrón, se aporta.
+  // Las quincenas con aporte puesto usan ese monto; las demás que tocan, el del escenario.
+  // Cada fila es un aporte; su rendimiento es el acumulado desde el aporte anterior.
+  function proyectarMeta(m, aporte, cal = calendarioMeta(m), pat = patronMeta(m)) {
     const r = tasaMetaQ(m), obj = +m.objetivo;
-    let saldo = saldoMeta(m), k = 0;
-    const serie = [round2(saldo)];
-    while (saldo < obj - 0.005 && k < 600) {
-      saldo = saldo * (1 + r) + aporte; k++;
-      serie.push(round2(saldo));
-      if (k > 2 && saldo <= serie[k - 1]) return { ok: false, serie };
+    let saldo = saldoMeta(m), rend = 0, aportado = 0, acum = 0, k = 0, n = 0, fecha = null;
+    const filas = [], serie = [round2(saldo)], fechas = [iso(today())];
+    while (saldo < obj - 0.005 && n < 1200) {
+      if (k >= cal.reg.length && !(aporte > 0) && !(r > 0 && saldo > 0)) break;   // ya no hay cómo crecer
+      n++;
+      const f = cal.reg[k++];
+      fecha = f ? f.fecha : k === cal.reg.length + 1 ? cal.next : quincenaDespues(fecha);
+      const reg = f?.pago != null;
+      const i = round2(saldo * r);
+      saldo = round2(saldo + i); rend += i; acum = round2(acum + i);
+      const p = reg ? f.pago : tocaAbono(pat, fecha) && saldo < obj - 0.005 ? round2(Math.min(aporte, obj - saldo)) : 0;
+      saldo = round2(saldo + p); aportado += p;
+      serie.push(saldo); fechas.push(fecha);
+      if (p > 0 || saldo >= obj - 0.005) { filas.push({ fecha, pago: p, interes: acum, saldo, reg }); acum = 0; }
     }
-    return { ok: saldo >= obj - 0.005, quincenas: k, serie };
+    return { ok: saldo >= obj - 0.005, filas, abonos: filas.filter((f) => f.pago > 0).length, quincenas: n,
+      interes: round2(rend), pagado: round2(aportado), fin: filas.at(-1)?.fecha, serie, fechas };
+  }
+
+  // Cuánto aportar en las quincenas sin aporte puesto para llegar a la fecha (considera el rendimiento)
+  function aporteParaFecha(m, cal = calendarioMeta(m)) {
+    if (!m.fecha_meta) return null;
+    const falta = +m.objetivo - saldoMeta(m);
+    if (falta <= 0) return { pago: 0, abonos: 0 };
+    const pat = patronMeta(m);
+    return buscarPago(m.fecha_meta, cal, (x) => proyectarMeta(m, x, cal, pat), falta + 1);
+  }
+
+  // Escenarios para comparar: tu plan, el de la fecha meta, aportar más y aportar menos
+  function escenariosMeta(m) {
+    const cal = calendarioMeta(m), pat = patronMeta(m), ritmo = ritmoMeta(m);
+    const out = [];
+    if (ritmo.monto > 0) out.push({ key: "plan", title: ritmo.fuente === "plan" ? "Tu plan" : "Tu ritmo actual", sub: ritmo.fuente === "plan" ? "Aporte planeado" : "Promedio de tus aportes", pago: ritmo.monto });
+    const pf = aporteParaFecha(m, cal);
+    if (pf?.pago > 0 && (!ritmo.monto || Math.abs(pf.pago - ritmo.monto) >= 1)) out.push({ key: "fecha", title: `Lograrla en ${monthYear(parseISO(m.fecha_meta))}`, sub: "Tu fecha meta", pago: pf.pago });
+    const base = ritmo.monto || pf?.pago || 0;
+    if (base > 0) out.push({ key: "mas", title: "Aportando más", sub: "50% más en cada aporte", pago: redondeoArriba(base * 1.5) });
+    if (base >= 2) out.push({ key: "menos", title: "Aportando menos", sub: "La mitad en cada aporte", pago: round2(base / 2) });
+    return out.map((e) => ({ ...e, r: proyectarMeta(m, e.pago, cal, pat) }));
+  }
+
+  const planMetaHTML = (m, escs) =>
+    planHTML(VOC.meta, m.id, escs, patronMeta(m), calendarioMeta(m).reg.filter((f) => f.pago != null), ritmoMeta(m).fuente === "plan");
+
+  // Resumen corto del plan para la tarjeta de la meta
+  function planMetaLineas(m) {
+    const lines = [];
+    const pat = patronMeta(m), ritmo = ritmoMeta(m);
+    const regs = calendarioMeta(m).reg.filter((f) => f.pago != null);
+    if (ritmo.monto > 0 || regs.length || +m.rendimiento_pct > 0) {
+      const r = proyectarMeta(m, ritmo.monto, undefined, pat);
+      const tarde = r.ok && m.fecha_meta && r.fin > m.fecha_meta;
+      const como = r.ok && r.filas.every((f) => f.reg || !f.pago)
+        ? (regs.length ? "Con los aportes que ya pusiste" : "Solo con el rendimiento")
+        : (regs.length ? `${regs.length === 1 ? "Con tu aporte ya puesto" : `Con tus ${regs.length} aportes ya puestos`} (${fmt(sum(regs, (f) => f.pago))}) y luego ` : "Aportando ") +
+          `${fmt(ritmo.monto)}${cadaCorto(pat)}${ritmo.fuente === "promedio" ? " (promedio)" : ""}`;
+      lines.push(r.ok
+        ? `${como} llegas en <b>${monthYear(parseISO(r.fin))}</b> · ${abonosTxt(VOC.meta, r.abonos)}${r.interes > 0 ? ` · rendimiento ${fmt(r.interes)}` : ""}${tarde ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
+        : `<span class="warn">${ritmo.monto > 0 ? `Con ${fmt(ritmo.monto)}${cadaCorto(pat)} no llegas a la meta` : "Define un aporte planeado para las quincenas siguientes"}</span>`);
+    } else lines.push(`<span class="muted">Aún no hay aportes: define un aporte planeado o vincula un gasto.</span>`);
+    if (m.fecha_meta) {
+      const pf = aporteParaFecha(m);
+      lines.push(pf.error === "pasada"
+        ? `<span class="warn">La fecha (${longDate(m.fecha_meta)}) ya pasó</span>`
+        : pf.error === "registrado"
+        ? `<span class="warn">No hay quincenas para aportar antes del ${longDate(m.fecha_meta)}</span>`
+        : pf.pago === 0
+        ? `${regs.length ? "Con lo que ya pusiste" : "Solo con el rendimiento"} llegas antes del ${longDate(m.fecha_meta)} ✓`
+        : `Para el ${longDate(m.fecha_meta)}: aparta <b>${fmt(pf.pago)}</b> ${cadaTxt(pat)}${regs.length ? " después de lo ya puesto" : ""} (${abonosTxt(VOC.meta, pf.abonos)})`);
+    }
+    return lines;
   }
 
   // Gasto mensual base para el fondo de emergencia: los fijos de la última quincena
@@ -996,7 +1078,7 @@
     render();
   });
 
-  const metasAbiertas = new Set();     // proyecciones desplegadas (sobreviven al re-render)
+  const metasAbiertas = new Set();     // planes desplegados (sobreviven al re-render)
   function renderMetas() {
     renderFondo();
     const ms = S.metas;
@@ -1008,23 +1090,7 @@
       const obj = +m.objetivo;
       const pct = obj > 0 ? Math.max(0, Math.min(100, (saldo / obj) * 100)) : 0;
       const falta = round2(obj - saldo);
-      const ritmo = ritmoMeta(m);
-      const nec = aporteNecesario(m);
-      const lines = [];
-      if (falta > 0) {
-        if (ritmo.monto > 0 || +m.rendimiento_pct > 0) {
-          const pr = proyectarMeta(m, ritmo.monto);
-          const atrasado = pr.ok && m.fecha_meta && fechaEn(pr.quincenas) > parseISO(m.fecha_meta);
-          lines.push(pr.ok
-            ? `A este ritmo (${fmt(ritmo.monto)}/quinc.${ritmo.fuente === "promedio" ? ", promedio" : ""}) llegas en <b>${pr.quincenas} quincenas</b> ≈ ${monthYear(fechaEn(pr.quincenas))}${atrasado ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
-            : `<span class="warn">A este ritmo no llegas a la meta</span>`);
-        } else lines.push(`<span class="muted">Aún no hay aportes: define un aporte por quincena o vincula un gasto.</span>`);
-        if (m.fecha_meta) {
-          lines.push(nec == null
-            ? `<span class="warn">La fecha (${longDate(m.fecha_meta)}) ya pasó</span>`
-            : `Para el ${longDate(m.fecha_meta)}: aparta <b>${fmt(nec)}</b> por quincena (${quincenasHasta(m.fecha_meta)})`);
-        }
-      }
+      const lines = falta > 0 ? planMetaLineas(m) : [];
       const movs = [
         ...S.metaMovs.filter((x) => x.meta_id === m.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Retiro" : "Aporte"), m: +x.monto, movId: x.id })),
         ...S.gastos.filter((g) => g.meta_id === m.id && g.pagado).map((g) => ({ t: byId("periodos", g.periodo_id)?.fecha ?? g.created_at, label: "Aporte · " + pName(g.periodo_id), m: +g.monto })),
@@ -1040,7 +1106,7 @@
         <div class="deuda-meta">
           <span>${pct.toFixed(0)}% de ${fmt(obj)}</span>
           <span>${falta > 0 ? `Faltan ${fmt(falta)}` : "<b class='pos'>¡Meta lograda! 🎉</b>"}</span>
-          ${+m.aporte_quincenal > 0 ? `<span>Aporte ${fmt(+m.aporte_quincenal)}/quinc.</span>` : ""}
+          ${+m.aporte_quincenal > 0 ? `<span>Aporte ${fmt(+m.aporte_quincenal)}${cadaCorto(patronMeta(m))}</span>` : ""}
           ${rend ? `<span>Rendimiento ${rend}% mensual</span>` : ""}
         </div>
         ${lines.length ? `<div class="meta-plan">${lines.map((l) => `<span>${l}</span>`).join("")}</div>` : ""}
@@ -1049,22 +1115,26 @@
           <button class="btn sm" type="button" data-act="mov">± Aporte / retiro</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
-        ${falta > 0 && (ritmo.monto > 0 || rend > 0) ? `<details class="proj" data-meta="${m.id}" ${metasAbiertas.has(m.id) ? "open" : ""}><summary>Ver proyección</summary><div class="chart"></div></details>` : ""}
+        ${falta > 0 ? `<details class="plan" data-meta="${m.id}" ${metasAbiertas.has(m.id) ? "open" : ""}><summary>📅 Plan de aportes y escenarios</summary><div class="plan-body">${planMetaHTML(m, escenariosMeta(m))}</div></details>` : ""}
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
           ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="mov-amt"><span class="${x.m < 0 ? "neg" : "pos"}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span>${x.movId ? `<button class="mov-del" type="button" data-act="del-mov" data-mov="${x.movId}" title="Eliminar movimiento" aria-label="Eliminar movimiento">✕</button>` : ""}</span></div>`).join("")}
         </div></details>` : ""}
       </div>`;
     }).join("");
-    $$("#metaList details.proj[open]").forEach(drawProyeccion);
+    $$("#metaList details.plan[open]").forEach(drawProyeccion);
   }
 
+  // Gráfica del ahorro proyectado con el escenario elegido
   function drawProyeccion(det) {
     const m = byId("metas", det.dataset.meta);
-    if (!m) return;
-    const pr = proyectarMeta(m, ritmoMeta(m).monto);
-    lineChart($(".chart", det), {
-      labels: pr.serie.map((_, i) => (i === 0 ? "Hoy" : `Q${i} · ${monthYear(fechaEn(i))}`)),
-      xTicks: (i) => (i === 0 ? "Hoy" : monthYear(fechaEn(i))),
+    const el = $(".chart", det);
+    if (!m || !el) return;
+    const escs = escenariosMeta(m);
+    if (!escs.length) return;
+    const pr = escElegido(m.id, escs).r;
+    lineChart(el, {
+      labels: pr.fechas.map((f, i) => (i === 0 ? "Hoy" : longDate(f))),
+      xTicks: (i) => (i === 0 ? "Hoy" : monthYear(parseISO(pr.fechas[i]))),
       series: [{ name: "Ahorro proyectado", color: "--series-1", values: pr.serie }],
       target: { value: +m.objetivo, label: "Meta " + fmt0(+m.objetivo) },
     });
@@ -1072,7 +1142,7 @@
   // "toggle" no burbujea: se escucha en captura
   $("#metaList").addEventListener("toggle", (e) => {
     const det = e.target;
-    if (!det.matches?.("details.proj")) return;
+    if (!det.matches?.("details.plan")) return;
     if (det.open) { metasAbiertas.add(det.dataset.meta); drawProyeccion(det); }
     else metasAbiertas.delete(det.dataset.meta);
   }, true);
@@ -1308,7 +1378,7 @@
   const redrawCharts = () => {
     if (S.tab === "reportes") renderReportes();
     if (S.tab === "deudas") renderSim();
-    if (S.tab === "ahorro") $$("#metaList details.proj[open]").forEach(drawProyeccion);
+    if (S.tab === "ahorro") $$("#metaList details.plan[open]").forEach(drawProyeccion);
   };
   window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(redrawCharts, 150); });
   window.addEventListener("themechange", redrawCharts);
@@ -1323,7 +1393,7 @@
     window.scrollTo({ top: 0 });
     if (tab === "reportes") renderReportes();
     if (tab === "deudas") renderSim();
-    if (tab === "ahorro") $$("#metaList details.proj[open]").forEach(drawProyeccion);
+    if (tab === "ahorro") $$("#metaList details.plan[open]").forEach(drawProyeccion);
   }
   $("#bottomNav").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
@@ -1613,7 +1683,7 @@
       // Aporte planeado de cada meta (si no venía ya en los gastos copiados)
       const yaVinculadas = new Set(copyFrom.map(({ g }) => g.meta_id).filter(Boolean));
       const aportes = S.metas
-        .filter((m) => +m.aporte_quincenal > 0 && !yaVinculadas.has(m.id) && saldoMeta(m) < +m.objetivo)
+        .filter((m) => +m.aporte_quincenal > 0 && !yaVinculadas.has(m.id) && saldoMeta(m) < +m.objetivo && tocaAbono(patronMeta(m), row.fecha))
         .map((m, i) => nuevoAporte(m, Math.min(+m.aporte_quincenal, round2(+m.objetivo - saldoMeta(m))), ins.id, copyFrom.length + i + 1));
       if (aportes.length) db.insert("gastos", aportes);
       // Abono planeado de cada deuda (si no venía ya en los gastos copiados)
@@ -1716,12 +1786,12 @@
     const d = byId("deudas", card.dataset.id);
     if (act === "edit") return openDeuda(d);
     const escBtn = e.target.closest("[data-esc]");
-    if (escBtn) { deudaEsc.set(d.id, escBtn.dataset.esc); renderDeudas(); return; }
+    if (escBtn) { planEsc.set(d.id, escBtn.dataset.esc); renderDeudas(); return; }
     if (act === "usar-plan") {
       const pago = +e.target.closest("[data-pago]").dataset.pago;
       db.update("deudas", d.id, { pago_plan: pago });
-      deudaEsc.delete(d.id);
-      render(); toast(`Plan de ${d.nombre}: ${fmt(pago)} por quincena`);
+      planEsc.delete(d.id);
+      render(); toast(`Plan de ${d.nombre}: ${fmt(pago)} ${cadaTxt(patronDeuda(d))}`);
       return;
     }
     if (act === "cargo") openCargo("Cargo a " + d.nombre, { table: "deuda_cargos", field: "deuda_id", id: d.id }, "Positivo suma, negativo resta");
@@ -1793,6 +1863,15 @@
     if (!card || !act) return;
     const m = byId("metas", card.dataset.id);
     if (act === "edit") return openMeta(m);
+    const escBtn = e.target.closest("[data-esc]");
+    if (escBtn) { planEsc.set(m.id, escBtn.dataset.esc); renderMetas(); return; }
+    if (act === "usar-plan") {
+      const aporte = +e.target.closest("[data-pago]").dataset.pago;
+      db.update("metas", m.id, { aporte_quincenal: aporte });
+      planEsc.delete(m.id);
+      render(); toast(`Plan de ${m.nombre}: ${fmt(aporte)} ${cadaTxt(patronMeta(m))}`);
+      return;
+    }
     if (act === "mov") openCargo("Movimiento en " + m.nombre, { table: "meta_movs", field: "meta_id", id: m.id }, "Positivo aporta, negativo retira");
     if (act === "rend") {
       const monto = round2((saldoMeta(m) * +m.rendimiento_pct) / 100);

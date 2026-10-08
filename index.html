@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -314,11 +314,11 @@
         <label>Ya tengo<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
       </div>
       <div class="grid2">
-        <label>Aporte por quincena<input name="aporte_quincenal" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
+        <label>Aporte planeado<input name="aporte_quincenal" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
         <label>Rendimiento % mensual<input name="rendimiento_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
       </div>
       <label>Lograrla para (opcional)<input name="fecha_meta" type="date"></label>
-      <p class="muted small">El aporte se agrega como gasto en cada quincena nueva (vinculado a la meta). Cuenta como ahorro cuando lo marcas pagado.</p>
+      <p class="muted small">El aporte se agrega como gasto en cada quincena nueva (vinculado a la meta; solo en la del 15 o la del 30 si aportas una vez al mes). Cuenta como ahorro cuando lo marcas pagado.</p>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="metaDelete">Eliminar</button>
         <span class="spacer"></span>
@@ -371,7 +371,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="config.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

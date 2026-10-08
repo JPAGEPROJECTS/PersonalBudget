@@ -356,7 +356,6 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
 
 /* ---------- Metas: plan y avisos ---------- */
 .meta-plan { display: grid; gap: 4px; font-size: .85rem; }
-.proj .chart { margin-top: 8px; }
 .chart .tick.ref { fill: var(--text); opacity: .7; }
 .alert { align-items: center; }
 .alert .alert-txt { flex: 1; }
@@ -483,7 +482,7 @@ details.plan summary { color: var(--primary); font-weight: 600; }
 .esc-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
 .esc-grid .sim-opt { align-content: start; }
 /* La tarjeta con el plan abierto ocupa todo el ancho de la cuadrícula */
-#deudaList .deuda:has(details.plan[open]) { grid-column: 1 / -1; }
+#deudaList .deuda:has(details.plan[open]), #metaList .deuda:has(details.plan[open]) { grid-column: 1 / -1; }
 .esc-grid .sim-opt strong { font-size: 1.05rem; }
 .plan-tabla { max-width: 760px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
 .plan-tabla table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }

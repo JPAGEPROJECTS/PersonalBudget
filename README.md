@@ -33,8 +33,8 @@ Un gasto vinculado a una deuda (campo *Abono a deuda / aporte a meta*) reduce el
 Funciona como las deudas, pero al revés: el saldo **sube** con cada aporte.
 - **Fondo de emergencia sugerido**: calcula tu gasto fijo mensual (o el promedio, si no marcaste fijos) y propone 3 o 6 meses como objetivo; con un toque crea la meta o ajusta la existente, y muestra cuántos meses cubres.
 - **Metas** con objetivo, saldo inicial y fecha opcional, con barra de avance.
-- **Aporte por quincena**: se agrega solo como gasto (vinculado a la meta) en cada quincena nueva; cuenta como ahorro al marcarlo pagado.
-- **Proyección**: "a este ritmo llegas en N quincenas (≈ mes y año)", con gráfica y línea de meta. Si la meta tiene fecha, calcula cuánto apartar por quincena y avisa si vas atrasado.
+- **Aporte planeado**: se agrega solo como gasto (vinculado a la meta) en cada quincena nueva que le toque; cuenta como ahorro al marcarlo pagado.
+- **Plan de aportes por meta** (igual que el de deudas): la tarjeta dice cuándo llegas y, si la meta tiene fecha, cuánto apartar. En *📅 Plan de aportes y escenarios* compara tu plan, el de tu fecha, aportar 50 % más y aportar la mitad (fecha, aportes y rendimiento), con gráfica y tabla aporte por aporte (aporte, rendimiento y ahorrado). Respeta si aportas **cada quincena o una vez al mes** (gasto fijo marcado *cada mes* o tus últimas quincenas), usa tal cual los aportes que ya pusiste en tus quincenas y suma el rendimiento cada quincena. *Usar como mi plan* guarda el aporte elegido.
 - **Rendimiento % mensual** (cuentas que pagan interés) con botón *+ Rendimiento*, y aportes/retiros manuales que se pueden eliminar con ✕.
 - En la quincena aparece un aviso 🐷 cuando lo planeado no alcanza para ir al día, con un botón para agregar el aporte que falta.
 - En *Reportes*, gráfica del **ahorro total** por quincena.
