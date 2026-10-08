@@ -483,6 +483,25 @@ details.plan summary { color: var(--primary); font-weight: 600; }
 .esc-grid .sim-opt { align-content: start; }
 /* La tarjeta con el plan abierto ocupa todo el ancho de la cuadrícula */
 #deudaList .deuda:has(details.plan[open]), #metaList .deuda:has(details.plan[open]) { grid-column: 1 / -1; }
+
+/* Lista de compras de una meta */
+details.lista summary { color: var(--primary); font-weight: 600; }
+details.lista[open] > summary { margin-bottom: 10px; }
+.lista-body { display: grid; gap: 12px; }
+.lista-body > p, .lista-grupo > p { margin: 0; }
+.lista-body > .btn { justify-self: start; }
+.lista-res { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .85rem; }
+.lista-grupo { display: grid; gap: 2px; }
+.lista-cat { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: .9rem; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.item { display: flex; align-items: center; gap: 10px; }
+.item + .item { border-top: 1px dashed var(--border); }
+.item input[type="checkbox"] { width: 20px; height: 20px; min-height: 0; margin: 0; flex: none; accent-color: var(--primary); }
+.item-main { flex: 1; min-width: 0; display: grid; text-align: left; background: none; border: 0; padding: 8px 0; color: inherit; font: inherit; cursor: pointer; }
+.item-main .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.done .item-nombre { text-decoration: line-through; color: var(--muted); }
+.item-link { text-decoration: none; padding: 4px; }
+.item-costo { display: grid; justify-items: end; font-size: .9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.item-costo s { font-size: .75rem; }
 .esc-grid .sim-opt strong { font-size: 1.05rem; }
 .plan-tabla { max-width: 760px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
 .plan-tabla table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }

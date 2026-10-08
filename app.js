@@ -115,9 +115,9 @@
 
   // ---------- Estado ----------
   // Nombre de tabla -> clave en S
-  const TABLES = { periodos: "periodos", gastos: "gastos", deudas: "deudas", deuda_cargos: "cargos", ingresos: "ingresos", metas: "metas", meta_movs: "metaMovs", prestamos: "prestamos", prestamo_movs: "prestamoMovs" };
+  const TABLES = { periodos: "periodos", gastos: "gastos", deudas: "deudas", deuda_cargos: "cargos", ingresos: "ingresos", metas: "metas", meta_movs: "metaMovs", meta_items: "metaItems", prestamos: "prestamos", prestamo_movs: "prestamoMovs" };
   const S = {
-    periodos: [], gastos: [], deudas: [], cargos: [], ingresos: [], metas: [], metaMovs: [], prestamos: [], prestamoMovs: [],
+    periodos: [], gastos: [], deudas: [], cargos: [], ingresos: [], metas: [], metaMovs: [], metaItems: [], prestamos: [], prestamoMovs: [],
     currentId: store.get("periodo"),
     tab: "periodo",
     hidePaid: store.get("hidePaid") === "1",
@@ -293,7 +293,7 @@
 
   function needsMigration() {
     showSetup("Actualiza la base de datos",
-      "Esta versión agrega funciones nuevas (metas, préstamos, gastos mensuales…) que necesitan columnas y tablas nuevas. " +
+      "Esta versión agrega funciones nuevas (metas, préstamos, listas de compras…) que necesitan columnas y tablas nuevas. " +
       "En Supabase abre <b>SQL Editor</b>, pega el contenido de <b>schema.sql</b> y ejecútalo; luego recarga esta página. " +
       "Tus datos se conservan.");
   }
@@ -311,7 +311,7 @@
     const results = await Promise.all([
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
       get("ingresos"), get("metas", "created_at"), get("meta_movs", "created_at"),
-      get("prestamos", "created_at"), get("prestamo_movs", "created_at"),
+      get("prestamos", "created_at"), get("prestamo_movs", "created_at"), get("meta_items", "orden"),
       sb.from("deudas").select("id,dia_pago,interes_frec,pago_plan,fecha_meta").limit(1),
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
       sb.from("ingresos").select("id,prestamo_id").limit(1),
@@ -319,8 +319,8 @@
     ]);
     const bad = results.find((r) => r.error);
     if (bad) return { error: bad.error, status: bad.status };
-    const [periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs] = results.map((r) => r.data);
-    return { data: { periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs } };
+    const [periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs, metaItems] = results.map((r) => r.data);
+    return { data: { periodos, gastos, deudas, cargos, ingresos, metas, metaMovs, prestamos, prestamoMovs, metaItems } };
   }
 
   let hasData = false;
@@ -1024,6 +1024,91 @@
     return lines;
   }
 
+  // ---------- Lista de compras de una meta ----------
+  // Lo que falta comprar forma el objetivo de la meta; al marcar algo como comprado,
+  // su costo sale del ahorro de la meta como un retiro (y el objetivo baja en lo estimado).
+  // [clave, ícono, nombre, etiqueta del dato extra, etiqueta de la fecha]
+  const ITEM_CATS = [
+    ["regalos", "🎁", "Regalos", "Para quién", null],
+    ["celebraciones", "🎉", "Celebraciones", "Evento", "Fecha del evento"],
+    ["viajes", "✈️", "Viajes", "Destino", null],
+    ["hogar", "🏠", "Hogar", "Tienda", null],
+    ["tecnologia", "💻", "Tecnología", "Tienda", null],
+    ["escuela", "🎓", "Escuela", "Para quién", null],
+    ["salud", "🩺", "Salud", "Para quién", null],
+    ["auto", "🚗", "Auto", null, null],
+    ["anuales", "📆", "Pagos anuales", null, "Fecha de pago"],
+    ["ropa", "👕", "Ropa y personal", "Para quién", null],
+    ["otros", "📦", "Otros", null, null],
+  ];
+  const itemCat = (k) => ITEM_CATS.find((c) => c[0] === k) ?? ITEM_CATS.at(-1);
+  const itemsDe = (m) => S.metaItems.filter((i) => i.meta_id === m.id).sort((a, b) => a.orden - b.orden);
+  const costoItem = (i) => +(i.comprado ? i.costo_real ?? i.costo_est : i.costo_est) || 0;
+  const objetivoLista = (m) => round2(sum(itemsDe(m).filter((i) => !i.comprado), (i) => i.costo_est));
+  function syncObjetivo(m) {
+    if (!m || !itemsDe(m).length) return;
+    const o = objetivoLista(m);
+    if (Math.abs(o - +m.objetivo) > 0.004) db.update("metas", m.id, { objetivo: o });
+  }
+
+  // Marca o desmarca un artículo como comprado, con su retiro del ahorro de la meta
+  function marcarComprado(it, comprado, real = it.costo_real ?? it.costo_est) {
+    real = round2(+real || 0);
+    if (comprado && !it.comprado) {
+      const mov = db.insert("meta_movs", { meta_id: it.meta_id, monto: -real, nota: "Compra: " + it.nombre });
+      db.update("meta_items", it.id, { comprado: true, costo_real: real, mov_id: mov.id });
+    } else if (comprado) {
+      if (it.mov_id && byId("metaMovs", it.mov_id)) db.update("meta_movs", it.mov_id, { monto: -real, nota: "Compra: " + it.nombre });
+      if (+it.costo_real !== real) db.update("meta_items", it.id, { costo_real: real });
+    } else if (it.comprado) {
+      if (it.mov_id && byId("metaMovs", it.mov_id)) db.remove("meta_movs", it.mov_id);
+      db.update("meta_items", it.id, { comprado: false, mov_id: null });
+    }
+    syncObjetivo(byId("metas", it.meta_id));
+  }
+
+  const listasAbiertas = new Set();    // listas desplegadas (sobreviven al re-render)
+  function listaHTML(m, items) {
+    const comprados = items.filter((i) => i.comprado);
+    const est = round2(sum(items, (i) => i.costo_est));
+    const gastado = round2(sum(comprados, costoItem));
+    const dif = round2(gastado - sum(comprados, (i) => i.costo_est));
+    const row = (i) => {
+      const c = itemCat(i.categoria);
+      const sub = [c[3] && i.para ? (c[3] === "Para quién" ? "Para " : c[3] + ": ") + esc(i.para) : "",
+        c[4] && i.fecha ? `${c[4] === "Fecha de pago" ? "Paga" : "El"} ${longDate(i.fecha)}` : "",
+        i.nota && !/^https?:\/\//i.test(i.nota) ? esc(i.nota) : ""].filter(Boolean).join(" · ");
+      const real = costoItem(i);
+      return `
+        <div class="item ${i.comprado ? "done" : ""}" data-item="${i.id}">
+          <input type="checkbox" data-act="item-toggle" ${i.comprado ? "checked" : ""} aria-label="Comprado: ${esc(i.nombre)}">
+          <button type="button" class="item-main" data-act="item-edit"><span class="item-nombre">${esc(i.nombre)}</span>${sub ? `<span class="muted small">${sub}</span>` : ""}</button>
+          ${i.nota && /^https?:\/\//i.test(i.nota) ? `<a class="item-link" href="${esc(i.nota)}" target="_blank" rel="noopener" title="Abrir enlace" aria-label="Abrir enlace">🔗</a>` : ""}
+          <span class="item-costo">${fmt(real)}${i.comprado && Math.abs(real - +i.costo_est) >= 0.01 ? `<s class="muted">${fmt(+i.costo_est)}</s>` : ""}</span>
+        </div>`;
+    };
+    const grupos = ITEM_CATS.map((c) => ({ c, its: items.filter((i) => itemCat(i.categoria) === c) })).filter((g) => g.its.length);
+    const porPersona = (its) => {
+      const m = new Map();
+      its.filter((i) => i.para?.trim()).forEach((i) => { const k = i.para.trim(); m.set(k, (m.get(k) ?? 0) + costoItem(i)); });
+      return m.size > 1 ? `<p class="muted small">Por persona: ${[...m].map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(" · ")}</p>` : "";
+    };
+    return `
+      ${items.length ? `<div class="lista-res">
+        <span>Estimado <b>${fmt(est)}</b></span><span>Gastado <b>${fmt(gastado)}</b></span><span>Falta comprar <b>${fmt(objetivoLista(m))}</b></span>
+        ${comprados.length && Math.abs(dif) >= 0.5 ? `<span class="${dif > 0 ? "warn" : "pos"}">${dif > 0 ? `⚠️ Te pasaste ${fmt(dif)} de lo estimado` : `✓ ${fmt(-dif)} menos de lo estimado`}</span>` : ""}
+      </div>
+      ${grupos.map(({ c, its }) => `
+        <div class="lista-grupo">
+          <div class="lista-cat"><span>${c[1]} ${c[2]}</span><span class="muted">${fmt(sum(its, costoItem))}</span></div>
+          ${c[3] === "Para quién" ? porPersona(its) : ""}
+          ${its.map(row).join("")}
+        </div>`).join("")}
+      <p class="muted small">El objetivo de la meta es lo que falta comprar. Al marcar algo como comprado, su costo sale del ahorro de la meta.</p>`
+      : `<p class="muted small">Anota lo que planeas comprar (regalos, viaje, útiles, pagos anuales…) con su costo estimado. La suma será el objetivo de la meta y el plan de aportes te dirá cuánto apartar.</p>`}
+      <button type="button" class="btn sm" data-act="item-add">+ Agregar a la lista</button>`;
+  }
+
   // Gasto mensual base para el fondo de emergencia: los fijos de la última quincena
   // del 15 y la del 30 (un mes); si no hay fijos, el promedio de tus gastos.
   // No cuenta aportes a metas ni préstamos.
@@ -1088,9 +1173,15 @@
     $("#metaList").innerHTML = ms.map((m) => {
       const saldo = saldoMeta(m);
       const obj = +m.objetivo;
-      const pct = obj > 0 ? Math.max(0, Math.min(100, (saldo / obj) * 100)) : 0;
+      const items = itemsDe(m);
+      const vacia = obj <= 0 && !items.length;
       const falta = round2(obj - saldo);
-      const lines = falta > 0 ? planMetaLineas(m) : [];
+      const lines = vacia ? [`<span class="muted">Define un objetivo en Editar o arma tu lista de compras.</span>`] : falta > 0 ? planMetaLineas(m) : [];
+      // Con lista, lo comprado ya salió del ahorro: el avance cuenta lo ahorrado más lo gastado
+      const gastado = round2(sum(items.filter((i) => i.comprado), costoItem));
+      const total = round2(obj + gastado);
+      const avance = items.length ? saldo + gastado : saldo;
+      const pct = total > 0 ? Math.max(0, Math.min(100, (avance / total) * 100)) : 0;
       const movs = [
         ...S.metaMovs.filter((x) => x.meta_id === m.id).map((x) => ({ t: x.created_at, label: x.nota || (x.monto < 0 ? "Retiro" : "Aporte"), m: +x.monto, movId: x.id })),
         ...S.gastos.filter((g) => g.meta_id === m.id && g.pagado).map((g) => ({ t: byId("periodos", g.periodo_id)?.fecha ?? g.created_at, label: "Aporte · " + pName(g.periodo_id), m: +g.monto })),
@@ -1104,8 +1195,8 @@
         </div>
         <div class="progress meta"><div style="width:${pct}%"></div></div>
         <div class="deuda-meta">
-          <span>${pct.toFixed(0)}% de ${fmt(obj)}</span>
-          <span>${falta > 0 ? `Faltan ${fmt(falta)}` : "<b class='pos'>¡Meta lograda! 🎉</b>"}</span>
+          <span>${pct.toFixed(0)}% de ${fmt(total)}</span>
+          ${vacia ? "" : `<span>${falta > 0 ? `Faltan ${fmt(falta)}` : `<b class='pos'>${items.length ? "¡Lista cubierta! 🎉" : "¡Meta lograda! 🎉"}</b>`}</span>`}
           ${+m.aporte_quincenal > 0 ? `<span>Aporte ${fmt(+m.aporte_quincenal)}${cadaCorto(patronMeta(m))}</span>` : ""}
           ${rend ? `<span>Rendimiento ${rend}% mensual</span>` : ""}
         </div>
@@ -1115,6 +1206,7 @@
           <button class="btn sm" type="button" data-act="mov">± Aporte / retiro</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
+        <details class="lista" data-lista="${m.id}" ${listasAbiertas.has(m.id) || vacia ? "open" : ""}><summary>🛍️ Lista de compras${items.length ? ` (${items.filter((i) => !i.comprado).length} por comprar)` : ""}</summary><div class="lista-body">${listaHTML(m, items)}</div></details>
         ${falta > 0 ? `<details class="plan" data-meta="${m.id}" ${metasAbiertas.has(m.id) ? "open" : ""}><summary>📅 Plan de aportes y escenarios</summary><div class="plan-body">${planMetaHTML(m, escenariosMeta(m))}</div></details>` : ""}
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
           ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="mov-amt"><span class="${x.m < 0 ? "neg" : "pos"}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span>${x.movId ? `<button class="mov-del" type="button" data-act="del-mov" data-mov="${x.movId}" title="Eliminar movimiento" aria-label="Eliminar movimiento">✕</button>` : ""}</span></div>`).join("")}
@@ -1142,6 +1234,7 @@
   // "toggle" no burbujea: se escucha en captura
   $("#metaList").addEventListener("toggle", (e) => {
     const det = e.target;
+    if (det.matches?.("details.lista")) { if (det.open) listasAbiertas.add(det.dataset.lista); else listasAbiertas.delete(det.dataset.lista); return; }
     if (!det.matches?.("details.plan")) return;
     if (det.open) { metasAbiertas.add(det.dataset.meta); drawProyeccion(det); }
     else metasAbiertas.delete(det.dataset.meta);
@@ -1829,7 +1922,10 @@
     $("#metaTitle").textContent = m ? "Editar meta" : "Nueva meta";
     $("#metaDelete").classList.toggle("hidden", !m);
     metaForm.nombre.value = m?.nombre ?? "";
-    metaForm.objetivo.value = m ? +m.objetivo : "";
+    const conLista = !!m && itemsDe(m).length > 0;
+    metaForm.objetivo.value = m ? (conLista ? objetivoLista(m) : +m.objetivo || "") : "";
+    metaForm.objetivo.readOnly = conLista;
+    $("#metaObjHint").classList.toggle("hidden", !conLista);
     metaForm.saldo_inicial.value = m ? +m.saldo_inicial || "" : "";
     metaForm.fecha_meta.value = m?.fecha_meta ?? "";
     metaForm.aporte_quincenal.value = m?.aporte_quincenal ?? "";
@@ -1839,9 +1935,11 @@
   metaForm.addEventListener("submit", (e) => {
     if (e.submitter?.value !== "ok") return;
     const [objetivo, ini, aporte, rend] = ["objetivo", "saldo_inicial", "aporte_quincenal", "rendimiento_pct"].map((k) => parseNum(metaForm[k].value));
-    if (objetivo == null || [objetivo, ini, aporte, rend].some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
+    if ([objetivo, ini, aporte, rend].some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
+    const editando = editingMetaId && byId("metas", editingMetaId);
     const row = {
-      nombre: metaForm.nombre.value.trim(), objetivo, saldo_inicial: ini ?? 0, fecha_meta: metaForm.fecha_meta.value || null,
+      nombre: metaForm.nombre.value.trim(),
+      objetivo: editando && itemsDe(editando).length ? objetivoLista(editando) : objetivo ?? 0, saldo_inicial: ini ?? 0, fecha_meta: metaForm.fecha_meta.value || null,
       aporte_quincenal: aporte > 0 ? aporte : null, rendimiento_pct: rend ?? 0,
     };
     if (editingMetaId && byId("metas", editingMetaId)) db.update("metas", editingMetaId, row);
@@ -1853,16 +1951,91 @@
     if (!m || !confirm(`¿Eliminar la meta "${m.nombre}"? Los gastos se conservan.`)) return;
     db.remove("metas", m.id);
     S.metaMovs = S.metaMovs.filter((x) => x.meta_id !== m.id);
+    S.metaItems = S.metaItems.filter((x) => x.meta_id !== m.id);
     S.gastos.forEach((g) => { if (g.meta_id === m.id) g.meta_id = null; });
     persist();
     metaDialog.close(); render();
   });
+  // ---------- Artículos de la lista de compras ----------
+  const itemDialog = $("#itemDialog");
+  const itemForm = $("#itemForm");
+  let editingItem = null, itemMetaId = null;
+  let lastItemCat = store.get("itemCat") || "regalos";
+  itemForm.categoria.innerHTML = ITEM_CATS.map(([k, icon, name]) => `<option value="${k}">${icon} ${name}</option>`).join("");
+
+  // El dato extra y la fecha cambian según la categoría
+  function itemCampos() {
+    const c = itemCat(itemForm.categoria.value);
+    $("#itemParaLbl").classList.toggle("hidden", !c[3]);
+    $("#itemParaLbl span").textContent = c[3] ?? "";
+    $("#itemFechaLbl").classList.toggle("hidden", !c[4]);
+    $("#itemFechaLbl span").textContent = c[4] ?? "";
+  }
+  itemForm.categoria.addEventListener("change", itemCampos);
+
+  function openItem(m, it = null) {
+    editingItem = it?.id ?? null;
+    itemMetaId = m.id;
+    $("#itemTitle").textContent = it ? "Editar artículo" : `Agregar a ${m.nombre}`;
+    $("#itemDelete").classList.toggle("hidden", !it);
+    itemForm.nombre.value = it?.nombre ?? "";
+    itemForm.categoria.value = it?.categoria ?? lastItemCat;
+    itemForm.para.value = it?.para ?? "";
+    itemForm.fecha.value = it?.fecha ?? "";
+    itemForm.costo_est.value = it ? +it.costo_est || "" : "";
+    itemForm.costo_real.value = it?.costo_real != null ? +it.costo_real : "";
+    itemForm.nota.value = it?.nota ?? "";
+    itemForm.comprado.checked = !!it?.comprado;
+    itemCampos();
+    itemDialog.showModal();
+  }
+
+  itemForm.addEventListener("submit", (e) => {
+    if (e.submitter?.value !== "ok") return;
+    const [est, real] = ["costo_est", "costo_real"].map((k) => parseNum(itemForm[k].value));
+    if ([est, real].some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
+    const m = byId("metas", itemMetaId);
+    if (!m) return;
+    const c = itemCat(itemForm.categoria.value);
+    lastItemCat = c[0]; store.set("itemCat", c[0]);
+    const row = {
+      nombre: itemForm.nombre.value.trim(), categoria: c[0],
+      para: c[3] ? itemForm.para.value.trim() || null : null, fecha: c[4] ? itemForm.fecha.value || null : null,
+      costo_est: est ?? 0, costo_real: real, nota: itemForm.nota.value.trim() || null,
+    };
+    let it = editingItem && byId("metaItems", editingItem);
+    if (it) db.update("meta_items", it.id, row);
+    else it = db.insert("meta_items", { ...row, meta_id: m.id, comprado: false, mov_id: null, orden: Math.max(0, ...itemsDe(m).map((i) => i.orden)) + 1 });
+    marcarComprado(it, itemForm.comprado.checked, real ?? est ?? 0);
+    syncObjetivo(m);
+    listasAbiertas.add(m.id);
+    render();
+  });
+
+  $("#itemDelete").addEventListener("click", () => {
+    const it = byId("metaItems", editingItem);
+    if (!it) return;
+    if (!confirm(`¿Quitar "${it.nombre}" de la lista?${it.comprado ? " La compra se queda registrada en los movimientos de la meta." : ""}`)) return;
+    db.remove("meta_items", it.id);
+    syncObjetivo(byId("metas", it.meta_id));
+    itemDialog.close(); render();
+  });
+
   $("#metaList").addEventListener("click", (e) => {
     const card = e.target.closest(".deuda");
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!card || !act) return;
     const m = byId("metas", card.dataset.id);
     if (act === "edit") return openMeta(m);
+    if (act === "item-add") return openItem(m);
+    const itemEl = e.target.closest("[data-item]");
+    const it = itemEl && byId("metaItems", itemEl.dataset.item);
+    if (act === "item-edit" && it) return openItem(m, it);
+    if (act === "item-toggle" && it) {
+      marcarComprado(it, e.target.checked);
+      render(); toast(e.target.checked ? `${it.nombre}: comprado (${fmt(costoItem(it))} sale del ahorro)` : `${it.nombre}: por comprar`);
+      return;
+    }
     const escBtn = e.target.closest("[data-esc]");
     if (escBtn) { planEsc.set(m.id, escBtn.dataset.esc); renderMetas(); return; }
     if (act === "usar-plan") {
@@ -1884,7 +2057,9 @@
       const x = byId("metaMovs", e.target.closest("[data-mov]").dataset.mov);
       if (!x || !confirm(`¿Eliminar "${x.nota || (x.monto < 0 ? "Retiro" : "Aporte")}" (${fmt(+x.monto)}) de ${m.nombre}?`)) return;
       db.remove("meta_movs", x.id);
-      render(); toast("Movimiento eliminado");
+      const it = S.metaItems.find((i) => i.mov_id === x.id);
+      if (it) { db.update("meta_items", it.id, { comprado: false, mov_id: null }); syncObjetivo(m); }
+      render(); toast(it ? `Movimiento eliminado: ${it.nombre} vuelve a estar por comprar` : "Movimiento eliminado");
     }
   });
 

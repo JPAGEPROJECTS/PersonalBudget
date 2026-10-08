@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=10">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
   <header class="topbar">
@@ -310,7 +310,7 @@
       <h3 id="metaTitle">Nueva meta</h3>
       <label>Nombre<input name="nombre" required maxlength="40" placeholder="Fondo de emergencia"></label>
       <div class="grid2">
-        <label>Objetivo<input name="objetivo" type="text" inputmode="decimal" required autocomplete="off" placeholder="2000"></label>
+        <label>Objetivo<input name="objetivo" type="text" inputmode="decimal" autocomplete="off" placeholder="2000 o arma una lista"></label>
         <label>Ya tengo<input name="saldo_inicial" type="text" inputmode="decimal" autocomplete="off" placeholder="0"></label>
       </div>
       <div class="grid2">
@@ -318,9 +318,34 @@
         <label>Rendimiento % mensual<input name="rendimiento_pct" type="text" inputmode="decimal" autocomplete="off" placeholder="Opcional"></label>
       </div>
       <label>Lograrla para (opcional)<input name="fecha_meta" type="date"></label>
+      <p class="muted small hidden" id="metaObjHint">🛍️ El objetivo se calcula con tu lista de compras: es lo que falta comprar.</p>
       <p class="muted small">El aporte se agrega como gasto en cada quincena nueva (vinculado a la meta; solo en la del 15 o la del 30 si aportas una vez al mes). Cuenta como ahorro cuando lo marcas pagado.</p>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="metaDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="itemDialog" class="sheet">
+    <form method="dialog" id="itemForm">
+      <h3 id="itemTitle">Agregar a la lista</h3>
+      <label>Qué es<input name="nombre" required maxlength="60" autocomplete="off" placeholder="Perfume, pasajes, llantas…"></label>
+      <label>Categoría<select name="categoria"></select></label>
+      <div class="grid2">
+        <label id="itemParaLbl"><span>Para quién</span><input name="para" maxlength="40" autocomplete="off" placeholder="Opcional"></label>
+        <label id="itemFechaLbl"><span>Fecha</span><input name="fecha" type="date"></label>
+      </div>
+      <div class="grid2">
+        <label>Costo estimado<input name="costo_est" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00 (acepta 50+20)"></label>
+        <label>Costo real<input name="costo_real" type="text" inputmode="decimal" autocomplete="off" placeholder="Al comprarlo"></label>
+      </div>
+      <label>Nota o enlace<input name="nota" maxlength="300" autocomplete="off" placeholder="Talla, tienda, https://…"></label>
+      <label class="check"><input type="checkbox" name="comprado"> Comprado (sale del ahorro de la meta)</label>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="itemDelete">Quitar</button>
         <span class="spacer"></span>
         <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
         <button value="ok" class="btn primary">Guardar</button>
@@ -371,7 +396,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="config.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
