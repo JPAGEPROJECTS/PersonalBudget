@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -291,10 +291,10 @@
         <label>Pago mínimo<input name="pago_minimo" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
       </div>
       <div class="grid2">
-        <label>Pago planeado por quincena<input name="pago_plan" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
+        <label>Pago planeado por abono<input name="pago_plan" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
         <label>Terminar de pagar para<input name="fecha_meta" type="date"></label>
       </div>
-      <p class="muted small">Con un pago planeado, cada quincena nueva incluye el abono automáticamente. Con una fecha, te digo cuánto pagar para lograrlo.</p>
+      <p class="muted small">Con un pago planeado, cada quincena nueva incluye el abono automáticamente (solo en la del 15 o la del 30 si abonas una vez al mes). Con una fecha, te digo cuánto pagar para lograrlo.</p>
       <p class="muted small" id="deudaEditHint">Al editar, el saldo es el inicial; los abonos y cargos se suman/restan automáticamente.</p>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="deudaDelete">Eliminar</button>
@@ -371,7 +371,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="config.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
