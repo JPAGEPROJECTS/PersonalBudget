@@ -591,6 +591,7 @@
           <button class="btn sm" type="button" data-act="presto">+ Le presté</button>
           <button class="btn sm" type="button" data-act="devolvio">✓ Me devolvió</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
+          <button class="btn sm danger" type="button" data-act="delete">Eliminar</button>
         </div>
         ${movs.length ? `<details><summary>Movimientos (${movs.length})</summary><div class="movs">
           ${movs.map((x) => `<div><span>${esc(x.label)}</span><span class="mov-amt"><span class="${x.m < 0 ? "pos" : ""}">${x.m < 0 ? "−" : "+"}${fmt(Math.abs(x.m))}</span>${x.movId ? `<button class="mov-del" type="button" data-act="del-mov" data-mov="${x.movId}" title="Eliminar movimiento" aria-label="Eliminar movimiento">✕</button>` : ""}</span></div>`).join("")}
@@ -2092,15 +2093,18 @@
     else db.insert("prestamos", row);
     render();
   });
-  $("#prestamoDelete").addEventListener("click", () => {
-    const pr = byId("prestamos", editingPrestamoId);
-    if (!pr || !confirm(`¿Eliminar el préstamo de "${pr.nombre}"? Los gastos e ingresos se conservan.`)) return;
+  function deletePrestamo(pr) {
+    if (!pr || !confirm(`¿Eliminar el préstamo de "${pr.nombre}"? Los gastos e ingresos se conservan.`)) return false;
     db.remove("prestamos", pr.id);
     S.prestamoMovs = S.prestamoMovs.filter((x) => x.prestamo_id !== pr.id);
     S.gastos.forEach((g) => { if (g.prestamo_id === pr.id) g.prestamo_id = null; });
     S.ingresos.forEach((i) => { if (i.prestamo_id === pr.id) i.prestamo_id = null; });
     persist();
-    prestamoDialog.close(); render();
+    render(); toast(`Préstamo de ${pr.nombre} eliminado`);
+    return true;
+  }
+  $("#prestamoDelete").addEventListener("click", () => {
+    if (deletePrestamo(byId("prestamos", editingPrestamoId))) prestamoDialog.close();
   });
   $("#prestamoList").addEventListener("click", (e) => {
     const card = e.target.closest(".prestamo");
@@ -2108,6 +2112,7 @@
     if (!card || !act) return;
     const pr = byId("prestamos", card.dataset.id);
     if (act === "edit") return openPrestamo(pr);
+    if (act === "delete") return deletePrestamo(pr);
     const target = { table: "prestamo_movs", field: "prestamo_id", id: pr.id };
     if (act === "presto") openCargo(`Le presté a ${pr.nombre}`, { ...target, nota: "Le presté" }, "Monto");
     if (act === "devolvio") openCargo(`${pr.nombre} me devolvió`, { ...target, sign: -1, nota: "Me devolvió" }, "Monto");
