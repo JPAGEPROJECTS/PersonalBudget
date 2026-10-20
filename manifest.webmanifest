@@ -1,6 +1,6 @@
 {
-  "name": "Presupuesto Quincenal",
-  "short_name": "Presupuesto",
+  "name": "Quincy · Presupuesto quincenal",
+  "short_name": "Quincy",
   "description": "Gastos, deudas y ahorro por quincena",
   "lang": "es",
   "start_url": "./",
