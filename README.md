@@ -40,6 +40,11 @@ Funciona como las deudas, pero al revés: el saldo **sube** con cada aporte.
 - En la quincena aparece un aviso 🐷 cuando lo planeado no alcanza para ir al día, con un botón para agregar el aporte que falta.
 - En *Reportes*, gráfica del **ahorro total** por quincena.
 
+### Cuentas
+- Cada persona **crea su cuenta** (usuario o correo + contraseña) en la pantalla de inicio y ve **solo sus datos**.
+- Menú 👤 arriba: **Cambiar contraseña** (cierra la sesión en los otros dispositivos) y **Cerrar sesión**.
+- No usa Supabase Auth: los usuarios están en la tabla `usuarios` con la contraseña cifrada (bcrypt). Al entrar, la base da un token que la app manda en cada consulta, y las políticas de seguridad solo dejan ver y cambiar las filas de ese usuario. La sesión dura 60 días y se renueva cada vez que abres la app. Tras 5 contraseñas incorrectas seguidas la cuenta se bloquea 15 minutos.
+
 ### App instalable y sin conexión
 - Se instala como app (ícono propio, pantalla completa). En Chrome/Edge aparece el botón ⬇️ arriba.
 - **Funciona sin internet**: los datos se guardan en el dispositivo y los cambios que hagas sin conexión se envían solos cuando vuelve la red (arriba se ve *"Sin conexión · N sin guardar"*).
@@ -49,10 +54,10 @@ Funciona como las deudas, pero al revés: el saldo **sube** con cada aporte.
 1. Crea un proyecto en [supabase.com](https://supabase.com).
 2. **SQL Editor → New query**: pega el contenido de `schema.sql` y ejecútalo. Se puede volver a ejecutar sin problema y actualiza las versiones anteriores sin perder datos (si la app dice *"Actualiza la base de datos"*, es esto).
 3. **Project Settings → API**: copia la *Project URL* y la clave pública (*anon* / *publishable*) en `config.js`.
-4. (Opcional) Importar los datos del Excel: ejecuta `seed.sql` en el SQL Editor **una sola vez**, porque si lo repites se duplican los datos.
-5. Abre `index.html`.
+4. Abre `index.html` y crea tu cuenta.
+5. (Opcional) Importar los datos del Excel: ejecuta `seed.sql` en el SQL Editor **una sola vez** (si lo repites se duplican los datos) y después pásalos a tu cuenta con `select public.asignar_datos_sin_dueno('tu-usuario');`.
 
-> **Sin login:** cualquier persona que tenga la URL de la página (o la de Supabase junto con la clave pública) puede ver y modificar los datos. No compartas el enlace.
+**Si venías de la versión sin login:** después de `schema.sql`, tus datos quedan sin dueño y no los ve nadie. Crea tu cuenta en la app y ejecuta en el SQL Editor `select public.asignar_datos_sin_dueno('tu-usuario');` para pasártelos.
 
 ## Abrirla en el celular
 
@@ -69,5 +74,5 @@ Al publicar una versión nueva, sube el número de `CACHE` en `sw.js` y el `?v=`
 - `app.js`: lógica, cálculos y conexión con Supabase
 - `config.js`: credenciales de Supabase
 - `manifest.webmanifest`, `sw.js`, `icons/`: app instalable y modo sin conexión
-- `schema.sql`: tablas y políticas de seguridad
+- `schema.sql`: tablas, usuarios, funciones de login y políticas de seguridad
 - `seed.sql`: datos importados de `presupuesto.xlsx`

@@ -13,6 +13,7 @@
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } },
+    del(k) { try { localStorage.removeItem(k); } catch { /* sin almacenamiento */ } },
   };
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
     : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)));
@@ -96,22 +97,76 @@
   function showSetup(title, html) {
     $("#appView").classList.add("hidden");
     $("#bottomNav").classList.add("hidden");
+    $("#loginView").classList.add("hidden");
     $("#setupView").classList.remove("hidden");
+    $("#userBtn").classList.toggle("hidden", !session?.token);
     $("#setupTitle").textContent = title;
     $("#setupMsg").innerHTML = html;
   }
   function showApp() {
     $("#setupView").classList.add("hidden");
+    $("#loginView").classList.add("hidden");
     $("#appView").classList.remove("hidden");
     $("#bottomNav").classList.remove("hidden");
+    $("#userBtn").classList.remove("hidden");
   }
+  function showLogin(msg = "", usuario = "") {
+    $("#appView").classList.add("hidden");
+    $("#bottomNav").classList.add("hidden");
+    $("#setupView").classList.add("hidden");
+    $("#userBtn").classList.add("hidden");
+    $("#loginView").classList.remove("hidden");
+    if (usuario) $("#loginForm").usuario.value = usuario;
+    loginError(msg);
+  }
+  function loginError(msg) {
+    $("#loginMsg").textContent = msg;
+    $("#loginMsg").classList.toggle("hidden", !msg);
+  }
+
+  // ---------- Sesión ----------
+  // Usuarios propios (tabla public.usuarios), no Supabase Auth: login() devuelve un token que
+  // viaja en el header x-session-token y las políticas de la base lo convierten en usuario_id.
+  const SESSION_KEY = "pb_session";
+  let session = null;
+  try { session = JSON.parse(store.get(SESSION_KEY) || "null"); } catch { session = null; }
+
   if (!window.supabase || !cfg.SUPABASE_URL || cfg.SUPABASE_URL.includes("TU-PROYECTO")) {
     showSetup("Configura Supabase", "Edita <b>config.js</b> con la URL y la clave pública de tu proyecto, y ejecuta <b>schema.sql</b> en el SQL Editor. Revisa el README.");
     return;
   }
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: session?.token ? { headers: { "x-session-token": session.token } } : {},
   });
+
+  // Revisa con el servidor que la sesión siga vigente (y la renueva).
+  // true = válida, false = vencida (muestra el login), null = sin red.
+  let sesionOk = false;
+  async function verificarSesion() {
+    let res;
+    try { res = await sb.rpc("yo"); } catch { return null; }
+    if (res.error) {
+      if (!res.status) return null;
+      if (isSchemaErr(res.error)) { needsMigration(); return false; }
+      console.error(res.error);
+      return null;
+    }
+    if (!res.data) {
+      session = { ...session, token: null };        // deja de sincronizar hasta volver a entrar
+      store.set(SESSION_KEY, JSON.stringify(session));
+      showLogin("Tu sesión venció. Vuelve a entrar; los cambios sin guardar se envían al entrar.", session.usuario);
+      return false;
+    }
+    sesionOk = true;
+    session = { ...session, ...res.data };
+    store.set(SESSION_KEY, JSON.stringify(session));
+    renderUser();
+    return true;
+  }
+  function renderUser() {
+    $("#userName").textContent = session.nombre ? `${session.nombre} · ${session.usuario}` : session.usuario;
+  }
 
   // ---------- Estado ----------
   // Nombre de tabla -> clave en S
@@ -208,7 +263,14 @@
   // ---------- Datos sin conexión ----------
   // Cada cambio se aplica al estado local, se guarda en el dispositivo y se envía
   // a Supabase en orden. Si no hay red, queda en cola hasta que vuelva.
-  const CACHE_KEY = "pb_cache", QUEUE_KEY = "pb_queue";
+  // Cada usuario tiene su propia copia y su propia cola en el dispositivo
+  const CACHE_KEY = "pb_cache:" + (session?.id ?? ""), QUEUE_KEY = "pb_queue:" + (session?.id ?? "");
+  if (session?.token) {
+    // Cambios pendientes de la versión sin login: pasan a la primera cuenta que entra en este dispositivo
+    const viejos = store.get("pb_queue");
+    if (viejos && viejos !== "[]" && !store.get(QUEUE_KEY)) store.set(QUEUE_KEY, viejos);
+    store.del("pb_queue"); store.del("pb_cache");
+  }
   let queue = [];
   try { queue = JSON.parse(store.get(QUEUE_KEY) || "[]"); } catch { queue = []; }
   let flushing = false;
@@ -241,7 +303,9 @@
     },
   };
 
-  const isSchemaErr = (e) => ["42703", "42P01", "PGRST204", "PGRST205"].includes(e?.code);
+  const isSchemaErr = (e) => ["42703", "42P01", "42883", "PGRST202", "PGRST204", "PGRST205"].includes(e?.code);
+  // Sin sesión válida la base rechaza la fila (usuario_id vacío o de otro usuario)
+  const isAuthErr = (e) => ["42501", "23502"].includes(e?.code);
 
   async function runOp(op) {
     const t = sb.from(op.t);
@@ -251,16 +315,22 @@
   }
 
   async function flush() {
-    if (flushing || !queue.length) return;
+    if (flushing || !queue.length || !session?.token) return;
     flushing = true; renderSync();
     let dropped = false;
     try {
+      // Con un token vencido los cambios se perderían sin error: primero se confirma la sesión
+      if (!sesionOk) {
+        const ok = await verificarSesion();
+        if (!ok) { if (ok === null) S.offline = true; return; }
+      }
       while (queue.length) {
         let res;
         try { res = await busy(runOp(queue[0])); } catch (err) { res = { error: err, status: 0 }; }
         if (res.error) {
           if (!res.status) { S.offline = true; break; }          // sin red: se reintenta luego
           if (isSchemaErr(res.error)) { needsMigration(); break; }
+          if (isAuthErr(res.error) && !(await verificarSesion())) break;  // se envía al volver a entrar
           console.error(res.error, queue[0]);
           toast("No se pudo guardar un cambio: " + res.error.message);
           queue.shift(); dropped = true;
@@ -293,7 +363,7 @@
 
   function needsMigration() {
     showSetup("Actualiza la base de datos",
-      "Esta versión agrega funciones nuevas (metas, préstamos, listas de compras…) que necesitan columnas y tablas nuevas. " +
+      "Esta versión agrega funciones nuevas (cuentas con login, metas, préstamos, listas de compras…) que necesitan columnas y tablas nuevas. " +
       "En Supabase abre <b>SQL Editor</b>, pega el contenido de <b>schema.sql</b> y ejecútalo; luego recarga esta página. " +
       "Tus datos se conservan.");
   }
@@ -306,7 +376,7 @@
       return req;
     };
     // Verifica que el esquema esté actualizado
-    const probe = await sb.from("gastos").select("id,vence,categoria,fijo,meta_id,frecuencia,prestamo_id").limit(1);
+    const probe = await sb.from("gastos").select("id,vence,categoria,fijo,meta_id,frecuencia,prestamo_id,usuario_id").limit(1);
     if (probe.error) return { error: probe.error, status: probe.status };
     const results = await Promise.all([
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
@@ -325,7 +395,8 @@
 
   let hasData = false;
   async function loadRemote() {
-    if (queue.length) return;                     // primero hay que enviar lo pendiente
+    if (queue.length || !session?.token) return;  // primero hay que enviar lo pendiente
+    if (!sesionOk && (await verificarSesion()) === false) return;  // sin sesión llegaría vacío
     let res;
     try { res = await busy(fetchAll()); } catch (err) { res = { error: err, status: 0 }; }
     if (res.error) {
@@ -1516,19 +1587,25 @@
   $("#addGastoBtn").addEventListener("click", () => openGasto());
 
   // Menú de quincena
-  const menu = $("#menuSheet");
-  $("#periodMenuBtn").addEventListener("click", (e) => {
+  const menu = $("#menuSheet"), userMenu = $("#userMenu");
+  function toggleMenu(m, e) {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
-    menu.style.top = r.bottom + 6 + "px";
-    menu.style.right = Math.max(8, document.documentElement.clientWidth - r.right) + "px";
-    menu.classList.toggle("hidden");
-  });
+    m.style.top = r.bottom + 6 + "px";
+    m.style.right = Math.max(8, document.documentElement.clientWidth - r.right) + "px";
+    (m === menu ? userMenu : menu).classList.add("hidden");
+    m.classList.toggle("hidden");
+  }
+  $("#periodMenuBtn").addEventListener("click", (e) => toggleMenu(menu, e));
+  $("#userBtn").addEventListener("click", (e) => toggleMenu(userMenu, e));
   document.addEventListener("click", (e) => {
     if (!menu.contains(e.target)) menu.classList.add("hidden");
+    if (!userMenu.contains(e.target)) userMenu.classList.add("hidden");
     const a = e.target.closest("[data-action]");
     if (!a) return;
-    menu.classList.add("hidden");
+    menu.classList.add("hidden"); userMenu.classList.add("hidden");
+    if (a.dataset.action === "change-pass") openClave();
+    if (a.dataset.action === "logout") cerrarSesion();
     if (a.dataset.action === "new-period") openPeriod();
     if (a.dataset.action === "edit-period") openPeriod(current());
     if (a.dataset.action === "mark-all") markAllPaid();
@@ -2129,8 +2206,72 @@
     if (pr && !ingresoForm.descripcion.value.trim()) ingresoForm.descripcion.value = "Devolución " + pr.nombre;
   });
 
+  // ---------- Cuenta ----------
+  const loginForm = $("#loginForm");
+  let registrando = false;
+  function modoLogin(reg) {
+    registrando = reg;
+    $$(".reg-only", loginForm).forEach((el) => el.classList.toggle("hidden", !reg));
+    loginForm.clave2.required = reg;
+    loginForm.clave.autocomplete = reg ? "new-password" : "current-password";
+    $("#loginTitle").textContent = reg ? "Crear cuenta" : "Entrar";
+    $("#loginSubmit").textContent = reg ? "Crear cuenta" : "Entrar";
+    $("#loginSwitch").textContent = reg ? "Ya tengo cuenta" : "Crear cuenta nueva";
+    loginError("");
+  }
+  $("#loginSwitch").addEventListener("click", () => modoLogin(!registrando));
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = loginForm;
+    const usuario = f.usuario.value.trim().toLowerCase(), clave = f.clave.value;
+    if (registrando && clave !== f.clave2.value) return loginError("Las contraseñas no coinciden");
+    let res;
+    try {
+      res = await busy(registrando
+        ? sb.rpc("registrar", { p_usuario: usuario, p_clave: clave, p_nombre: f.nombre.value.trim() || null })
+        : sb.rpc("login", { p_usuario: usuario, p_clave: clave }));
+    } catch (err) { res = { error: err, status: 0 }; }
+    if (res.error) {
+      if (isSchemaErr(res.error)) return needsMigration();
+      return loginError(!res.status ? "Sin conexión. Inténtalo cuando vuelva la red." : res.error.message);
+    }
+    if (!res.data?.ok) return loginError(res.data?.error || "No se pudo entrar");
+    const { token, id, nombre } = res.data;
+    store.set(SESSION_KEY, JSON.stringify({ token, id, usuario: res.data.usuario, nombre }));
+    location.reload();                              // arranca limpio con la cuenta nueva
+  });
+
+  async function cerrarSesion() {
+    await flush();
+    if (queue.length && !confirm(`Tienes ${queue.length} cambio${queue.length === 1 ? "" : "s"} sin guardar que se perderán. ¿Cerrar sesión de todos modos?`)) return;
+    try { await busy(sb.rpc("logout")); } catch { /* sin red: el token vence solo */ }
+    store.del(SESSION_KEY); store.del(CACHE_KEY); store.del(QUEUE_KEY);
+    location.reload();
+  }
+
+  const claveDialog = $("#claveDialog");
+  const claveForm = $("#claveForm");
+  function openClave() {
+    claveForm.reset();
+    claveDialog.showModal();
+  }
+  claveForm.addEventListener("submit", async (e) => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault();
+    if (claveForm.nueva.value !== claveForm.nueva2.value) return toast("Las contraseñas nuevas no coinciden");
+    let res;
+    try {
+      res = await busy(sb.rpc("cambiar_clave", { p_actual: claveForm.actual.value, p_nueva: claveForm.nueva.value }));
+    } catch (err) { res = { error: err, status: 0 }; }
+    if (res.error) return toast(!res.status ? "Sin conexión: inténtalo cuando vuelva la red" : "No se pudo cambiar: " + res.error.message);
+    if (!res.data?.ok) return toast(res.data?.error || "No se pudo cambiar la contraseña");
+    claveDialog.close();
+    toast("Contraseña actualizada");
+  });
+
   // Cerrar diálogos tocando el fondo
   $$("dialog").forEach((dlg) => dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); }));
 
-  loadAll();
+  if (session?.token) { renderUser(); loadAll(); }
+  else showLogin("", session?.usuario);
 })();

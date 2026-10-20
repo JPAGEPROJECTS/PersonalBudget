@@ -22,13 +22,14 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
     <h1 class="brand">💰 Presupuesto</h1>
     <span id="syncState" class="sync hidden" role="status" aria-live="polite"></span>
     <button id="installBtn" class="icon-btn hidden" type="button" aria-label="Instalar app" title="Instalar app">⬇️</button>
+    <button id="userBtn" class="icon-btn hidden" type="button" aria-label="Mi cuenta" title="Mi cuenta">👤</button>
     <button id="themeToggle" class="icon-btn" type="button" aria-label="Cambiar tema" title="Modo oscuro">
       <span class="sun">☀️</span><span class="moon">🌙</span>
     </button>
@@ -40,6 +41,21 @@
       <h2 id="setupTitle">Configura Supabase</h2>
       <p class="muted" id="setupMsg"></p>
     </div>
+  </main>
+
+  <!-- ===== Entrar / crear cuenta ===== -->
+  <main id="loginView" class="view hidden">
+    <form id="loginForm" class="card setup-card">
+      <h2 id="loginTitle">Entrar</h2>
+      <p class="muted small" id="loginIntro">Cada cuenta ve solo sus propios datos.</p>
+      <label>Usuario o correo<input name="usuario" required maxlength="60" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label class="reg-only hidden">Nombre<input name="nombre" maxlength="40" autocomplete="name"></label>
+      <label>Contraseña<input name="clave" type="password" required autocomplete="current-password"></label>
+      <label class="reg-only hidden">Repite la contraseña<input name="clave2" type="password" autocomplete="new-password"></label>
+      <p id="loginMsg" class="neg small hidden" role="alert"></p>
+      <button class="btn primary" id="loginSubmit">Entrar</button>
+      <button type="button" class="btn ghost" id="loginSwitch">Crear cuenta nueva</button>
+    </form>
   </main>
 
   <!-- ===== App ===== -->
@@ -386,6 +402,27 @@
     </form>
   </dialog>
 
+  <dialog id="claveDialog" class="sheet">
+    <form method="dialog" id="claveForm">
+      <h3>Cambiar contraseña</h3>
+      <label>Contraseña actual<input name="actual" type="password" required autocomplete="current-password"></label>
+      <label>Nueva contraseña<input name="nueva" type="password" required minlength="6" autocomplete="new-password"></label>
+      <label>Repite la nueva<input name="nueva2" type="password" required minlength="6" autocomplete="new-password"></label>
+      <p class="muted small">Se cerrará la sesión en tus otros dispositivos.</p>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Cambiar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="userMenu" class="menu hidden" role="menu">
+    <p id="userName" class="menu-head muted small"></p>
+    <button type="button" data-action="change-pass" role="menuitem">🔑 Cambiar contraseña</button>
+    <button type="button" data-action="logout" role="menuitem">🚪 Cerrar sesión</button>
+  </div>
+
   <div id="menuSheet" class="menu hidden" role="menu">
     <button type="button" data-action="new-period" role="menuitem">➕ Nueva quincena</button>
     <button type="button" data-action="edit-period" role="menuitem">✏️ Editar quincena</button>
@@ -396,7 +433,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="config.js?v=12"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

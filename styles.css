@@ -247,6 +247,7 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
 }
 .menu button { border: 0; background: transparent; text-align: left; padding: 14px 16px; cursor: pointer; }
 .menu button + button { border-top: 1px solid var(--border); }
+.menu-head { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .menu button:hover { background: var(--surface-2); }
 
 .toast {
