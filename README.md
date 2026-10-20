@@ -1,6 +1,7 @@
 # Quincy
 
-nPresupuesto quincenal: gastos, deudas, ahorro y préstamos, de 15 en 15.
+Presupuesto quincenal: gastos, deudas, ahorro y préstamos, de 15 en 15.
+
 Versión web del `presupuesto.xlsx`: solo HTML, CSS y JS, con datos en Supabase. No necesita servidor; se puede abrir en GitHub Pages, Netlify, Vercel, Cloudflare Pages o cualquier hosting estático.
 
 ## Qué hace (igual que el Excel, más ágil)
