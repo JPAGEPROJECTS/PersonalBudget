@@ -838,28 +838,51 @@
 
   // Tabla de abonos: cada quincena se suma el interés y, si le toca abono según el patrón, se abona.
   // Las quincenas con abono puesto usan ese monto; las demás que tocan, el pago del escenario.
-  // Cada fila es un abono; su interés es el acumulado desde el abono anterior (más los cargos fijos,
-  // que entran una vez al mes: en la quincena del día de corte, o en la del 15 si no hay corte).
+  // Cada fila es un abono; su interés es el acumulado desde el abono anterior (más los cargos fijos).
+  // Como el banco (y el botón + Interés): el interés mensual se cobra completo una vez al mes sobre el saldo,
+  // igual que los cargos fijos, en la quincena del día de corte (o en la del 15 si no hay corte).
+  // El interés quincenal se cobra cada quincena.
+  // Si ya aplicaste con los botones el interés o los cargos fijos de ese corte (o de esa quincena, si el
+  // interés es quincenal), ya están en el saldo y no se vuelven a sumar. Lo aplicado antes del día de corte
+  // es del corte del mes anterior.
   function proyectarDeuda(d, pago, cal = calendarioDeuda(d), pat = patronDeuda(d)) {
-    const r = tasaQ(d);
-    const fijo = round2(+d.cargo_mensual || 0), mitadFijo = d.dia_corte > 15 ? 2 : 1;
+    const r = (+d.interes_pct || 0) / 100, quincenal = d.interes_frec === "quincenal";
+    const fijo = round2(+d.cargo_mensual || 0), mitadCorte = d.dia_corte > 15 ? 2 : 1;
+    const notaFijo = d.cargo_nota || "Cargos fijos del mes";
+    // Mes del corte al que pertenece una fecha (o la quincena, si porQuincena)
+    const ciclo = (f) => {
+      const [y, m, day] = f.split("-").map(Number);
+      const dc = Math.min(d.dia_corte || 1, new Date(y, m, 0).getDate());
+      return iso(new Date(y, m - 1 - (day < dc ? 1 : 0), 1)).slice(0, 7);
+    };
+    const clave = (f, porQuincena) => (porQuincena ? f.slice(0, 7) + "-" + mitad(f) : ciclo(f));
+    const hechos = S.cargos.filter((x) => x.deuda_id === d.id).map((x) => ({ nota: x.nota ?? "", f: iso(new Date(x.created_at)) }));
+    const aplicados = (pred, porQuincena) => new Map(hechos.filter(pred).map((x) => [clave(x.f, porQuincena), x.f]));
+    const intHecho = aplicados((x) => x.nota.startsWith("Interés"), quincenal);
+    const fijoHecho = aplicados((x) => x.nota === notaFijo);
+    const omitidos = [];   // lo que no se suma porque ya lo aplicaste: { que, fecha, el }
     let saldo = saldoDeuda(d), interes = 0, cargos = 0, pagado = 0, k = 0, fecha = null, acum = 0, n = 0;
     const filas = [];
     while (saldo > 0.005 && n++ < 1200) {
       const f = cal.reg[k++];
       fecha = f ? f.fecha : k === cal.reg.length + 1 ? cal.next : quincenaDespues(fecha);
       const reg = f?.pago != null;
-      const i = round2(saldo * r);
-      const c = fijo && mitad(fecha) === mitadFijo ? fijo : 0;
+      const corte = mitad(fecha) === mitadCorte;
+      const kF = fecha.slice(0, 7), kI = quincenal ? clave(fecha, true) : kF;   // la quincena del corte cae en el mes de su corte
+      const tocaI = r > 0 && (quincenal || corte), tocaF = fijo > 0 && corte;
+      if (tocaI && intHecho.has(kI)) omitidos.push({ que: "el interés", fecha, el: intHecho.get(kI) });
+      if (tocaF && fijoHecho.has(kF)) omitidos.push({ que: "los cargos fijos", fecha, el: fijoHecho.get(kF) });
+      const i = tocaI && !intHecho.has(kI) ? round2(saldo * r) : 0;
+      const c = tocaF && !fijoHecho.has(kF) ? fijo : 0;
       saldo = round2(saldo + i + c); interes += i; cargos += c; acum = round2(acum + i + c);
       if (!reg && !tocaAbono(pat, fecha)) continue;
       const p = round2(Math.min(reg ? f.pago : pago, saldo));
-      if (!reg && p <= acum) return { ok: false, filas, interes: round2(interes), cargos: round2(cargos) };   // el pago no cubre el interés
+      if (!reg && p <= acum) return { ok: false, filas, interes: round2(interes), cargos: round2(cargos), omitidos };   // el pago no cubre el interés
       saldo = round2(saldo - p); pagado += p;
       filas.push({ fecha, pago: p, interes: acum, saldo: Math.max(0, saldo), reg });
       acum = 0;
     }
-    return { ok: saldo <= 0.005, filas, abonos: filas.length, quincenas: n, interes: round2(interes), cargos: round2(cargos), pagado: round2(pagado), fin: filas.at(-1)?.fecha };
+    return { ok: saldo <= 0.005, filas, abonos: filas.length, quincenas: n, interes: round2(interes), cargos: round2(cargos), pagado: round2(pagado), fin: filas.at(-1)?.fecha, omitidos };
   }
 
   // Cuánto pagar en las quincenas sin monto puesto para lograrlo a más tardar en la fecha.
@@ -949,7 +972,7 @@
         <span class="muted small">${esc(e.sub)}</span>
         <strong>${regs.length ? `<span class="muted small">luego </span>` : ""}${fmt(e.pago)}<span class="muted small"> ${cadaCorto(pat)}</span></strong>
         ${e.r.ok ? `<span class="small">${v.llegas} ${monthYear(parseISO(e.r.fin))} · ${abonosTxt(v, e.r.abonos)}</span>
-        ${v.malo || e.r.interes > 0 ? `<span class="small">${v.interes}: ${fmt(e.r.interes)}</span>` : ""}${cmp(e)}`
+        ${v.malo || e.r.interes > 0 ? `<span class="small">${v.interes}: ${fmt(e.r.interes)}${e.r.cargos > 0 ? ` · cargos ${fmt(e.r.cargos)}` : ""}</span>` : ""}${cmp(e)}`
         : `<span class="neg small">${v.noOk}</span>`}
       </button>`;
     const patNota = pat.mitad
@@ -979,7 +1002,10 @@
       ${r.ok ? `<p class="small">${v.total(r)}</p>` : ""}` : ""}`;
   }
 
-  const planDeudaHTML = (d, escs) =>
+  // Avisa qué no se suma en el plan porque ya lo aplicaste con los botones
+  const omitidosHTML = (r) => (r?.omitidos ?? []).map((o) =>
+    `<p class="small plan-nota">✓ ${o.que[0].toUpperCase() + o.que.slice(1)} de la quincena del ${longDate(o.fecha)} ya está en el saldo (lo aplicaste el ${longDate(o.el)}), así que no se suma otra vez.</p>`).join("");
+  const planDeudaHTML = (d, escs) => omitidosHTML(escs[0]?.r) +
     planHTML(+d.cargo_mensual ? { ...VOC.deuda, col: "Interés y cargos" } : VOC.deuda, d.id, escs, patronDeuda(d), calendarioDeuda(d).reg.filter((f) => f.pago != null), ritmoDeuda(d).fuente === "plan");
 
   // Resumen corto del plan para la tarjeta de la deuda
