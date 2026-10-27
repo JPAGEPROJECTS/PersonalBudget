@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -307,6 +307,11 @@
         <label>Pago mínimo<input name="pago_minimo" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
       </div>
       <div class="grid2">
+        <label>Cargos fijos al mes<input name="cargo_mensual" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
+        <label>Detalle (opcional)<input name="cargo_nota" maxlength="40" placeholder="Plástico + seguro"></label>
+      </div>
+      <p class="muted small">Lo que te cobran cada mes aunque no compres (membresía del plástico, seguros). Se suma al plan de pagos en la quincena del día de corte.</p>
+      <div class="grid2">
         <label>Pago planeado por abono<input name="pago_plan" type="text" inputmode="decimal" autocomplete="off" placeholder="—"></label>
         <label>Terminar de pagar para<input name="fecha_meta" type="date"></label>
       </div>
@@ -433,7 +438,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=14"></script>
-  <script src="app.js?v=14"></script>
+  <script src="config.js?v=15"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

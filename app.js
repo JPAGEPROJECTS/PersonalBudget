@@ -382,7 +382,7 @@
       get("periodos"), get("gastos"), get("deudas", "created_at"), get("deuda_cargos", "created_at"),
       get("ingresos"), get("metas", "created_at"), get("meta_movs", "created_at"),
       get("prestamos", "created_at"), get("prestamo_movs", "created_at"), get("meta_items", "orden"),
-      sb.from("deudas").select("id,dia_pago,interes_frec,pago_plan,fecha_meta").limit(1),
+      sb.from("deudas").select("id,dia_pago,interes_frec,pago_plan,fecha_meta,cargo_mensual,cargo_nota").limit(1),
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
       sb.from("ingresos").select("id,prestamo_id").limit(1),
       sb.from("prestamos").select("id,fecha,fecha_pago").limit(1),
@@ -596,6 +596,7 @@
         d.dia_corte && `Corte: día ${d.dia_corte}`,
         d.dia_pago && `Pago: día ${d.dia_pago}${pi ? ` <b class="${pi.alert ? "warn" : ""}">(${pi.txt})</b>` : ""}`,
         d.pago_minimo && `Mínimo ${fmt(+d.pago_minimo)}`,
+        +d.cargo_mensual && `Cargos fijos ${fmt(+d.cargo_mensual)}/mes${d.cargo_nota ? ` (${esc(d.cargo_nota)})` : ""}`,
       ].filter(Boolean);
       return `
       <div class="card deuda" data-id="${d.id}">
@@ -617,6 +618,7 @@
         ${plan.length ? `<div class="meta-plan">${plan.map((l) => `<span>${l}</span>`).join("")}</div>` : ""}
         <div class="deuda-actions">
           ${+d.interes_pct ? `<button class="btn sm" type="button" data-act="interes">+ Interés ${+d.interes_pct}%</button>` : ""}
+          ${+d.cargo_mensual ? `<button class="btn sm" type="button" data-act="cargo-fijo">+ Cargos fijos ${fmt(+d.cargo_mensual)}</button>` : ""}
           <button class="btn sm" type="button" data-act="cargo">± Cargo</button>
           <button class="btn sm ghost" type="button" data-act="edit">Editar</button>
         </div>
@@ -681,14 +683,14 @@
   };
 
   function simular(deudas, pago, estrategia) {
-    const ds = deudas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: saldoDeuda(d), rate: tasaQ(d), min: (+d.pago_minimo || 0) / 2 }))   // mínimo mensual → por quincena
+    const ds = deudas.map((d) => ({ id: d.id, nombre: d.nombre, saldo: saldoDeuda(d), rate: tasaQ(d), min: (+d.pago_minimo || 0) / 2, fijo: (+d.cargo_mensual || 0) / 2 }))   // mínimo y cargos mensuales → por quincena
       .filter((d) => d.saldo > 0.005);
     const serie = [sum(ds, (d) => d.saldo)];
     const fin = {};
-    let interes = 0, k = 0;
+    let interes = 0, cargos = 0, k = 0;
     while (ds.some((d) => d.saldo > 0.005) && k < 600) {
       k++;
-      ds.forEach((d) => { if (d.saldo > 0) { const i = d.saldo * d.rate; d.saldo += i; interes += i; } });
+      ds.forEach((d) => { if (d.saldo > 0) { const i = d.saldo * d.rate; d.saldo += i + d.fijo; interes += i; cargos += d.fijo; } });
       let disp = pago;
       ds.forEach((d) => { if (d.saldo > 0) { const p = Math.min(d.min, d.saldo, disp); d.saldo -= p; disp -= p; } });
       const orden = ds.filter((d) => d.saldo > 0.005).sort(estrategia === "avalancha"
@@ -701,7 +703,7 @@
       if (k > 2 && tot >= serie[k - 1] - 0.005) return { ok: false, serie };   // el pago no cubre el interés
     }
     const ok = !ds.some((d) => d.saldo > 0.005);
-    return { ok, quincenas: k, interes: round2(interes), fin, serie };
+    return { ok, quincenas: k, interes: round2(interes), cargos: round2(cargos), fin, serie };
   }
   const fechaEn = (q) => { const d = today(); d.setDate(d.getDate() + Math.round(q * 15.22)); return d; };
 
@@ -836,25 +838,28 @@
 
   // Tabla de abonos: cada quincena se suma el interés y, si le toca abono según el patrón, se abona.
   // Las quincenas con abono puesto usan ese monto; las demás que tocan, el pago del escenario.
-  // Cada fila es un abono; su interés es el acumulado desde el abono anterior.
+  // Cada fila es un abono; su interés es el acumulado desde el abono anterior (más los cargos fijos,
+  // que entran una vez al mes: en la quincena del día de corte, o en la del 15 si no hay corte).
   function proyectarDeuda(d, pago, cal = calendarioDeuda(d), pat = patronDeuda(d)) {
     const r = tasaQ(d);
-    let saldo = saldoDeuda(d), interes = 0, pagado = 0, k = 0, fecha = null, acum = 0, n = 0;
+    const fijo = round2(+d.cargo_mensual || 0), mitadFijo = d.dia_corte > 15 ? 2 : 1;
+    let saldo = saldoDeuda(d), interes = 0, cargos = 0, pagado = 0, k = 0, fecha = null, acum = 0, n = 0;
     const filas = [];
     while (saldo > 0.005 && n++ < 1200) {
       const f = cal.reg[k++];
       fecha = f ? f.fecha : k === cal.reg.length + 1 ? cal.next : quincenaDespues(fecha);
       const reg = f?.pago != null;
       const i = round2(saldo * r);
-      saldo = round2(saldo + i); interes += i; acum = round2(acum + i);
+      const c = fijo && mitad(fecha) === mitadFijo ? fijo : 0;
+      saldo = round2(saldo + i + c); interes += i; cargos += c; acum = round2(acum + i + c);
       if (!reg && !tocaAbono(pat, fecha)) continue;
       const p = round2(Math.min(reg ? f.pago : pago, saldo));
-      if (!reg && p <= acum) return { ok: false, filas, interes: round2(interes) };   // el pago no cubre el interés
+      if (!reg && p <= acum) return { ok: false, filas, interes: round2(interes), cargos: round2(cargos) };   // el pago no cubre el interés
       saldo = round2(saldo - p); pagado += p;
       filas.push({ fecha, pago: p, interes: acum, saldo: Math.max(0, saldo), reg });
       acum = 0;
     }
-    return { ok: saldo <= 0.005, filas, abonos: filas.length, quincenas: n, interes: round2(interes), pagado: round2(pagado), fin: filas.at(-1)?.fecha };
+    return { ok: saldo <= 0.005, filas, abonos: filas.length, quincenas: n, interes: round2(interes), cargos: round2(cargos), pagado: round2(pagado), fin: filas.at(-1)?.fecha };
   }
 
   // Cuánto pagar en las quincenas sin monto puesto para lograrlo a más tardar en la fecha.
@@ -905,9 +910,9 @@
   const VOC = {
     deuda: {
       abono: "abono", Abono: "Abono", Verbo: "Abonas", pagar: "pagar", interes: "Interés", saldo: "Saldo", llegas: "Terminas", malo: true,
-      noOk: "No se termina: el interés es mayor que el pago",
+      noOk: "No se termina: el interés y los cargos son mayores que el pago",
       vacio: "Define un <b>pago planeado</b> o una <b>fecha para terminar</b> en Editar y aquí verás el calendario de pagos.",
-      total: (r) => `Total a pagar <b>${fmt(r.pagado)}</b>, de los cuales <b class="${r.interes > 0 ? "warn" : ""}">${fmt(r.interes)}</b> son intereses.`,
+      total: (r) => `Total a pagar <b>${fmt(r.pagado)}</b>, de los cuales <b class="${r.interes > 0 ? "warn" : ""}">${fmt(r.interes)}</b> son intereses${r.cargos > 0 ? ` y <b class="warn">${fmt(r.cargos)}</b> cargos fijos` : ""}.`,
     },
     meta: {
       abono: "aporte", Abono: "Aporte", Verbo: "Aportas", pagar: "aportar", interes: "Rendimiento", saldo: "Ahorrado", llegas: "Llegas", malo: false, chart: true,
@@ -930,10 +935,11 @@
     const cmp = (e) => {
       if (e === ref || !e.r.ok || !ref.r.ok) return "";
       const dq = ref.r.quincenas - e.r.quincenas;
-      const di = round2(v.malo ? ref.r.interes - e.r.interes : e.r.interes - ref.r.interes);   // > 0: a tu favor
+      const costo = (r) => r.interes + (r.cargos ?? 0);   // en deudas, terminar antes también ahorra cargos fijos
+      const di = round2(v.malo ? costo(ref.r) - costo(e.r) : e.r.interes - ref.r.interes);   // > 0: a tu favor
       const t = [dq > 0 ? `${quincTxt(dq)} antes` : dq < 0 ? `${quincTxt(-dq)} después` : "",
         di > 0.5 ? (v.malo ? `ahorras ${fmt(di)}` : `${fmt(di)} más de rendimiento`)
-        : di < -0.5 ? (v.malo ? `${fmt(-di)} más de interés` : `${fmt(-di)} menos de rendimiento`) : ""].filter(Boolean).join(" · ");
+        : di < -0.5 ? (v.malo ? `${fmt(-di)} más de ${e.r.cargos ? "interés y cargos" : "interés"}` : `${fmt(-di)} menos de rendimiento`) : ""].filter(Boolean).join(" · ");
       const bien = di > 0.5 || dq > 0;
       return t ? `<span class="small ${bien ? "pos" : "warn"}">${bien ? "✓" : "⚠️"} ${t}</span>` : "";
     };
@@ -962,7 +968,7 @@
       ${r.filas.length ? `
       <div class="plan-tabla">
         <table>
-          <thead><tr><th>Quincena</th><th>${v.Abono}</th><th>${v.interes}</th><th>${v.saldo}</th></tr></thead>
+          <thead><tr><th>Quincena</th><th>${v.Abono}</th><th>${v.col ?? v.interes}</th><th>${v.saldo}</th></tr></thead>
           <tbody>${r.filas.slice(0, MAXF).map((f, i) => `
             <tr class="${r.ok && i === ult ? "fin" : ""}"><td>${longDate(f.fecha)}${f.reg ? ` <span title="Monto puesto en tu quincena">📝</span>` : ""}</td><td>${!f.pago ? "—" : f.reg ? `<b>${fmt(f.pago)}</b>` : fmt(f.pago)}</td><td class="muted">${f.interes ? fmt(f.interes) : "—"}</td><td>${r.ok && i === ult ? `<b class='pos'>${v.malo ? "$0" : fmt(f.saldo)} ✓</b>` : fmt(f.saldo)}</td></tr>`).join("")}
           </tbody>
@@ -974,7 +980,7 @@
   }
 
   const planDeudaHTML = (d, escs) =>
-    planHTML(VOC.deuda, d.id, escs, patronDeuda(d), calendarioDeuda(d).reg.filter((f) => f.pago != null), ritmoDeuda(d).fuente === "plan");
+    planHTML(+d.cargo_mensual ? { ...VOC.deuda, col: "Interés y cargos" } : VOC.deuda, d.id, escs, patronDeuda(d), calendarioDeuda(d).reg.filter((f) => f.pago != null), ritmoDeuda(d).fuente === "plan");
 
   // Resumen corto del plan para la tarjeta de la deuda
   function planDeudaLineas(d) {
@@ -990,8 +996,8 @@
         : (regs.length ? `${regs.length === 1 ? "Con tu abono ya puesto" : `Con tus ${regs.length} abonos ya puestos`} (${fmt(sum(regs, (f) => f.pago))}) y luego ` : "Pagando ") +
           `${fmt(ritmo.monto)}${cadaCorto(pat)}${ritmo.fuente === "promedio" ? " (promedio)" : ""}`;
       lines.push(r.ok
-        ? `${como} terminas en <b>${monthYear(parseISO(r.fin))}</b> · ${abonoTxt(r.abonos)}${r.interes > 0 ? ` · interés ${fmt(r.interes)}` : ""}${tarde ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
-        : `<span class="neg">⚠️ ${ritmo.monto > 0 ? `Con ${fmt(ritmo.monto)}${cadaCorto(pat)} no se termina de pagar: el interés es mayor o igual al pago` : "Define un pago planeado para los abonos siguientes"}</span>`);
+        ? `${como} terminas en <b>${monthYear(parseISO(r.fin))}</b> · ${abonoTxt(r.abonos)}${r.interes > 0 ? ` · interés ${fmt(r.interes)}` : ""}${r.cargos > 0 ? ` · cargos ${fmt(r.cargos)}` : ""}${tarde ? " <b class='warn'>⚠️ después de tu fecha</b>" : ""}`
+        : `<span class="neg">⚠️ ${ritmo.monto > 0 ? `Con ${fmt(ritmo.monto)}${cadaCorto(pat)} no se termina de pagar: el interés${+d.cargo_mensual ? " y los cargos son mayores o iguales" : " es mayor o igual"} al pago` : "Define un pago planeado para los abonos siguientes"}</span>`);
     }
     if (d.fecha_meta) {
       const pf = pagoParaFecha(d);
@@ -1907,6 +1913,8 @@
     deudaForm.dia_corte.value = d?.dia_corte ?? "";
     deudaForm.dia_pago.value = d?.dia_pago ?? "";
     deudaForm.pago_minimo.value = d?.pago_minimo ?? "";
+    deudaForm.cargo_mensual.value = d?.cargo_mensual ?? "";
+    deudaForm.cargo_nota.value = d?.cargo_nota ?? "";
     deudaForm.pago_plan.value = d?.pago_plan ?? "";
     deudaForm.fecha_meta.value = d?.fecha_meta ?? "";
     deudaDialog.showModal();
@@ -1914,13 +1922,14 @@
 
   deudaForm.addEventListener("submit", (e) => {
     if (e.submitter?.value !== "ok") return;
-    const nums = ["saldo_inicial", "limite", "meta", "interes_pct", "pago_minimo", "pago_plan"].map((k) => parseNum(deudaForm[k].value));
+    const nums = ["saldo_inicial", "limite", "meta", "interes_pct", "pago_minimo", "pago_plan", "cargo_mensual"].map((k) => parseNum(deudaForm[k].value));
     if (nums.some(Number.isNaN)) { e.preventDefault(); toast("Revisa los montos"); return; }
-    const [saldo_inicial, limite, meta, interes_pct, pago_minimo, pago_plan] = nums;
+    const [saldo_inicial, limite, meta, interes_pct, pago_minimo, pago_plan, cargo_mensual] = nums;
     const row = {
       nombre: deudaForm.nombre.value.trim(), saldo_inicial: saldo_inicial ?? 0, limite, meta, interes_pct: interes_pct ?? 0,
       interes_frec: deudaForm.interes_frec.value, pago_minimo,
       pago_plan: pago_plan > 0 ? pago_plan : null, fecha_meta: deudaForm.fecha_meta.value || null,
+      cargo_mensual: cargo_mensual > 0 ? cargo_mensual : null, cargo_nota: deudaForm.cargo_nota.value.trim() || null,
       dia_corte: parseDay(deudaForm.dia_corte.value), dia_pago: parseDay(deudaForm.dia_pago.value),
     };
     if (editingDeudaId && byId("deudas", editingDeudaId)) db.update("deudas", editingDeudaId, row);
@@ -1972,6 +1981,13 @@
       if (!confirm(`Aplicar ${+d.interes_pct}% de interés (${fmt(monto)}) a ${d.nombre}?`)) return;
       db.insert("deuda_cargos", { deuda_id: d.id, monto, nota: `Interés ${+d.interes_pct}%` });
       render(); toast("Interés aplicado");
+    }
+    if (act === "cargo-fijo") {
+      const monto = round2(+d.cargo_mensual);
+      const nota = d.cargo_nota || "Cargos fijos del mes";
+      if (!confirm(`¿Sumar ${nota} (${fmt(monto)}) a ${d.nombre}?`)) return;
+      db.insert("deuda_cargos", { deuda_id: d.id, monto, nota });
+      render(); toast("Cargos fijos aplicados");
     }
     if (act === "del-cargo") {
       const c = S.cargos.find((x) => x.id === e.target.closest("[data-cargo]").dataset.cargo);
