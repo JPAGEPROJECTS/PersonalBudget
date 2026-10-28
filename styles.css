@@ -295,6 +295,22 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
   border-color: color-mix(in srgb, var(--neg) 35%, transparent);
 }
 
+.alert.clickable { cursor: pointer; }
+.alert.clickable:hover { filter: brightness(.97); }
+
+/* ---------- Topes por categoría ---------- */
+.after-detalle { text-align: right; margin-top: -6px; }
+.item.tope .body { display: grid; gap: 6px; }
+.item.tope .hero-row { align-items: center; }
+.item.tope .chip { flex: none; min-width: 36px; }
+.tope-bar { display: flex; height: 7px; }
+.tope-bar > div { border-radius: 0; flex: none; }
+.tope-bar.warn > div { background: var(--warn); }
+.tope-bar.neg > div { background: var(--neg); }
+.tope-bar > div.tenue { opacity: .35; }
+#noTopes .btn { margin-top: 8px; }
+.period-topes { margin-bottom: 18px; }
+
 /* ---------- Deudas: uso del crédito y simulador ---------- */
 .uso { display: grid; gap: 6px; }
 .uso .small { font-size: .85rem; }
@@ -396,8 +412,9 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
 .period-grid { display: flex; flex-direction: column; }
 .period-side { display: contents; }
 .period-summary { order: 1; }
-.period-gastos { order: 2; }
-.period-ingresos { order: 3; }
+.period-topes { order: 2; }
+.period-gastos { order: 3; }
+.period-ingresos { order: 4; }
 .hero { background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 10%, var(--surface)), var(--surface) 65%); }
 
 /* ---------- Tableta ---------- */
@@ -448,6 +465,8 @@ dialog.sheet form { display: grid; gap: 12px; padding: 20px 16px calc(16px + env
     max-height: calc(100dvh - 104px); overflow-y: auto; scrollbar-width: thin;
     padding: 2px; margin: -2px;
   }
+  .period-side > * { flex-shrink: 0; }   /* la columna hace scroll; los paneles no se encogen */
+  .period-topes { margin-bottom: 0; }
   .period-summary .stats:not(.three) { grid-template-columns: 1fr 1fr; margin: 12px 0 0; }
   .hero { padding: 20px; }
   .hero-amount { font-size: 2.6rem; }

@@ -1,6 +1,6 @@
 # Requerimiento: Topes por categoría en cada quincena
 
-**Estado:** pendiente. Solo existen la columna en `schema.sql` y los datos de ejemplo en `demo.sql`; la interfaz y el cálculo están por hacer · **Fecha:** 20 de octubre de 2026 (revisado el 28 de octubre de 2026)
+**Estado:** implementado (v17) · **Fecha:** 20 de octubre de 2026 (revisado el 28 de octubre de 2026)
 
 ## 1. Problema
 
@@ -74,7 +74,7 @@ Se hace por categoría (no solo ocio) para que el mismo control sirva para Comid
 | Quincena en curso | `quincenaEnCurso()` devuelve la quincena con `fecha ≤ hoy < finQuincena(fecha)`, o `null`. La usan el ritmo (RF-06), los avisos (RF-08) y la copia de topes (RF-10). No se usa `S.periodos[0]`, que es la más reciente y puede ser futura. |
 | Interfaz | Panel `#topesPanel` en `index.html`, diálogo `#topeDialog`; `openGasto(null, preset)` acepta categoría y pagado. |
 | Esquema | `alter table public.periodos add column if not exists topes jsonb not null default '{}'::jsonb;` y verificación en `fetchAll()`. |
-| Versión | `CACHE` y `?v=` suben a la siguiente versión al implementarlo (hoy están en 16). |
+| Versión | `CACHE` y `?v=` pasan de 16 a 17. |
 
 ## 6. Fuera de alcance (posibles mejoras)
 - Tope como **porcentaje** de los ingresos de la quincena.

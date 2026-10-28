@@ -22,7 +22,7 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <header class="topbar">
@@ -89,6 +89,7 @@
                   <span id="paidCount">0 de 0 pagados</span>
                   <span id="afterAll" class="muted"></span>
                 </div>
+                <div id="afterAllDetalle" class="muted small after-detalle hidden"></div>
               </div>
 
               <div class="stats">
@@ -102,6 +103,16 @@
                 <div class="stat"><span class="label">Pendiente</span><strong id="totalPendiente" class="warn">$0.00</strong></div>
                 <div class="stat"><span class="label">Ahorrado</span><strong id="totalAhorro">$0.00</strong></div>
               </div>
+            </div>
+
+            <div class="period-topes panel">
+              <div class="list-head section-gap">
+                <h2>Topes</h2>
+                <button id="addTopeBtn" class="chip" type="button">+ Tope</button>
+              </div>
+              <ul id="topeList" class="list"></ul>
+              <p id="noTopes" class="muted small">Ponle un límite a lo que gastas sin planear y mira cuánto te queda.
+                <button id="topeInvite" class="btn sm" type="button">🎮 Ponle un tope a tu ocio</button></p>
             </div>
 
             <div class="period-ingresos panel">
@@ -200,6 +211,12 @@
         <div id="chartAhorro" class="chart"></div>
       </div>
 
+      <div class="card chart-card hidden" id="topesCard">
+        <h3>Topes vs. usado</h3>
+        <div class="legend"><span><i style="background:var(--series-1)"></i>Topes</span><span><i style="background:var(--series-2)"></i>Usado (pagado + pendiente)</span></div>
+        <div id="chartTopes" class="chart"></div>
+      </div>
+
       <div class="card chart-card">
         <h3>Gastos por categoría</h3>
         <div id="chartCats"></div>
@@ -259,6 +276,21 @@
       <label>¿Es una devolución de un préstamo?<select name="prestamo_id"></select></label>
       <div class="actions">
         <button type="button" class="btn danger hidden" id="ingresoDelete">Eliminar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="ok" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="topeDialog" class="sheet">
+    <form method="dialog" id="topeForm">
+      <h3 id="topeTitle">Nuevo tope</h3>
+      <label>Categoría<select name="categoria"></select></label>
+      <label>Monto máximo en esta quincena<input name="monto" type="text" inputmode="decimal" required autocomplete="off" placeholder="0.00 (acepta 50+30)"></label>
+      <p class="muted small">Lo que sobre no pasa a la siguiente quincena.</p>
+      <div class="actions">
+        <button type="button" class="btn danger hidden" id="topeDelete">Quitar tope</button>
         <span class="spacer"></span>
         <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
         <button value="ok" class="btn primary">Guardar</button>
@@ -438,7 +470,7 @@
   <div id="loader" class="loader hidden"><div></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js?v=16"></script>
-  <script src="app.js?v=16"></script>
+  <script src="config.js?v=17"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

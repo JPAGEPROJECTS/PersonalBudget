@@ -50,6 +50,15 @@
     return d;
   }
   const enDias = (n) => (n === 0 ? "hoy" : n === 1 ? "mañana" : `en ${n} días`);
+  // Siguiente fecha de cobro, que es donde termina la quincena: antes del 20 -> el 30 (o el último día del mes);
+  // si no, el 15 del mes siguiente
+  function finQuincena(fecha) {
+    const [y, m, day] = fecha.split("-").map(Number);
+    let d = day < 20 ? new Date(y, m - 1, 30) : new Date(y, m, 15);
+    if (d.getDate() !== 15 && d.getDate() !== 30) d = new Date(d.getFullYear(), d.getMonth(), 0);   // febrero
+    return iso(d);
+  }
+  const quincenaDel = (fecha) => { const d = parseISO(fecha); return `Quincena del ${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()}`; };
 
   // ---------- UI básica ----------
   let toastTimer;
@@ -183,6 +192,8 @@
   const gastosDe = (pid) => S.gastos.filter((g) => g.periodo_id === pid).sort((a, b) => a.orden - b.orden || a.created_at.localeCompare(b.created_at));
   const ingresosDe = (pid) => S.ingresos.filter((i) => i.periodo_id === pid).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const byId = (key, id) => S[key].find((x) => x.id === id);
+  // La quincena en la que estamos hoy (no la más reciente: puede haber quincenas futuras ya creadas)
+  const quincenaEnCurso = () => { const h = iso(today()); return S.periodos.find((p) => p.fecha <= h && h < finQuincena(p.fecha)) ?? null; };
 
   function resumen(p) {
     const gs = gastosDe(p.id);
@@ -190,13 +201,35 @@
     const ingresos = round2(+p.salario + extra);
     const total = sum(gs, (g) => g.monto);
     const pagado = sum(gs.filter((g) => g.pagado), (g) => g.monto);
+    const topes = topesDe(p, gs);
+    const reservaTopes = round2(sum(topes, (t) => Math.max(0, t.queda)));   // lo que aún puedes gastar en los topes
     return {
       gs, extra, ingresos, total: round2(total), pagado: round2(pagado), pendiente: round2(total - pagado),
-      balance: round2(ingresos - pagado), finalBalance: round2(ingresos - total),
+      balance: round2(ingresos - pagado), sinTopes: round2(ingresos - total), finalBalance: round2(ingresos - total - reservaTopes),
       ahorro: round2(sum(gs.filter((g) => g.pagado && g.meta_id), (g) => g.monto)),
       nPagados: gs.filter((g) => g.pagado).length,
+      topes, reservaTopes,
     };
   }
+
+  // Topes de la quincena: gastado (pagado), comprometido (pendiente) y usado (los dos) en cada categoría
+  function topesDe(p, gs = gastosDe(p.id)) {
+    return Object.entries(p.topes ?? {})
+      .filter(([cat, v]) => catInfo(cat) && +v > 0)
+      .sort(([a], [b]) => CATS.findIndex((c) => c[0] === a) - CATS.findIndex((c) => c[0] === b))
+      .map(([cat, v]) => {
+        const tope = round2(+v), de = gs.filter((g) => g.categoria === cat);
+        const gastado = round2(sum(de.filter((g) => g.pagado), (g) => g.monto)), usado = round2(sum(de, (g) => g.monto));
+        return { cat, tope, gastado, comprometido: round2(usado - gastado), usado, queda: round2(tope - usado), pct: (usado / tope) * 100 };
+      });
+  }
+  // Color del tope: rojo al pasarse, amarillo desde el 80 % (llegar justo al tope es amarillo)
+  const nivelTope = (t) => (t.usado > t.tope + 0.005 ? "neg" : t.usado >= t.tope * 0.8 - 0.005 ? "warn" : "pos");
+  // Cuánto gastar por día sin pasarse: redondeado hacia abajo (a dólares, o a centavos si es menos de $1)
+  const ritmoTope = (queda, dias) => {
+    const x = queda / dias;
+    return x >= 1 ? fmt0(Math.floor(x)) : fmt(Math.floor(x * 100) / 100);
+  };
 
   function saldoDeuda(d) {
     const cargos = sum(S.cargos.filter((c) => c.deuda_id === d.id), (c) => c.monto);
@@ -386,6 +419,7 @@
       sb.from("metas").select("id,rendimiento_pct,aporte_quincenal").limit(1),
       sb.from("ingresos").select("id,prestamo_id").limit(1),
       sb.from("prestamos").select("id,fecha,fecha_pago").limit(1),
+      sb.from("periodos").select("id,topes").limit(1),
     ]);
     const bad = results.find((r) => r.error);
     if (bad) return { error: bad.error, status: bad.status };
@@ -497,9 +531,25 @@
         btn: `<button class="btn sm" type="button" data-action="add-aporte" data-meta="${m.id}" data-monto="${add}">+ ${fmt(add)}</button>`,
       });
     });
+    // Topes: solo de la quincena en curso, aunque se esté viendo otra (al tocarlos se pasa a ella); el rojo primero
+    const q = quincenaEnCurso();
+    if (q) {
+      const otra = q.id !== p.id;
+      topesDe(q).map((t) => ({ t, n: nivelTope(t) })).filter((x) => x.n !== "pos")
+        .sort((a, b) => (b.n === "neg") - (a.n === "neg"))
+        .forEach(({ t, n }) => {
+          const c = catInfo(t.cat);
+          items.push({
+            cls: n, icon: c[1], act: otra ? "ir-en-curso" : null,
+            html: `${otra ? `${quincenaDel(q.fecha)}: ` : ""}<b>${c[2]}</b> ${n === "neg"
+              ? `pasado del tope por ${fmt(-t.queda)} (${fmt(t.usado)} de ${fmt(t.tope)})`
+              : `al ${Math.floor(t.pct)} % del tope · te quedan ${fmt(t.queda)}`}`,
+          });
+        });
+    }
     const box = $("#alerts");
     box.classList.toggle("hidden", !items.length);
-    box.innerHTML = items.map((a) => `<div class="alert ${a.cls}"><span aria-hidden="true">${a.icon ?? "⚠️"}</span><span class="alert-txt">${a.html}</span>${a.btn ?? ""}</div>`).join("");
+    box.innerHTML = items.map((a) => `<div class="alert ${a.cls}${a.act ? " clickable" : ""}"${a.act ? ` data-action="${a.act}" role="button" tabindex="0"` : ""}><span aria-hidden="true">${a.icon ?? "⚠️"}</span><span class="alert-txt">${a.html}</span>${a.btn ?? ""}</div>`).join("");
   }
 
   function renderPeriodo() {
@@ -517,7 +567,12 @@
     bal.className = "hero-amount " + (r.balance < 0 ? "neg" : "");
     $("#progressBar").style.width = (r.total > 0 ? Math.min(100, (r.pagado / r.total) * 100) : 0) + "%";
     $("#paidCount").textContent = `${r.nPagados} de ${r.gs.length} pagados`;
-    $("#afterAll").textContent = r.pendiente > 0 ? `Si pagas todo: ${fmt(r.finalBalance)}` : "Todo pagado ✓";
+    // Con topes, "si pagas todo" aparta lo que aún puedes gastar en ellos, y el desglose lo explica
+    $("#afterAll").textContent = r.reservaTopes > 0 ? `Si pagas todo y gastas tus topes: ${fmt(r.finalBalance)}`
+      : r.pendiente > 0 ? `Si pagas todo: ${fmt(r.finalBalance)}` : "Todo pagado ✓";
+    $("#afterAllDetalle").classList.toggle("hidden", !(r.reservaTopes > 0));
+    $("#afterAllDetalle").textContent = `${fmt(r.sinTopes)} − ${fmt(r.reservaTopes)} apartados para topes`;
+    renderTopes(p, r.topes);
     if (document.activeElement !== $("#salaryInput")) $("#salaryInput").value = fmt(+p.salario);
     $("#totalExtra").textContent = fmt(r.extra);
     $("#totalGastos").textContent = fmt(r.total);
@@ -562,6 +617,31 @@
         <span class="amt pos">+${fmt(+i.monto)}</span>
       </li>`).join("");
     $("#noIngresos").classList.toggle("hidden", ings.length > 0);
+  }
+
+  // Categorías que pueden tener tope (deudas y ahorro son pagos planeados)
+  const CATS_TOPE = () => CATS.filter(([k]) => !["deudas", "ahorro"].includes(k));
+
+  function renderTopes(p, topes) {
+    const enCurso = quincenaEnCurso()?.id === p.id;
+    const fin = finQuincena(p.fecha), dias = daysBetween(today(), parseISO(fin));
+    $("#topeList").innerHTML = topes.map((t) => {
+      const c = catInfo(t.cat), n = nivelTope(t);
+      const wG = Math.min(100, (t.gastado / t.tope) * 100), wC = Math.min(100 - wG, (t.comprometido / t.tope) * 100);
+      const ritmo = !enCurso ? "" : t.queda <= 0 ? ` · Sin margen hasta el ${longDate(fin)}`
+        : ` · ${plural(dias, "día")} → ~${ritmoTope(t.queda, dias)}/día`;
+      return `
+      <li class="item tope" data-cat="${t.cat}">
+        <div class="body" data-act="edit">
+          <div class="hero-row"><span class="desc"><span class="cat">${c[1]}</span> ${c[2]}</span><span class="small"><b>${fmt(t.gastado)}</b> de ${fmt(t.tope)}</span></div>
+          <div class="progress tope-bar ${n}" aria-hidden="true"><div style="width:${wG}%"></div><div class="tenue" style="width:${wC}%"></div></div>
+          <div class="meta"><span class="${n === "pos" ? "" : n}">${t.queda < 0 ? `Te pasaste ${fmt(-t.queda)}` : `Te quedan ${fmt(t.queda)}`}</span>${ritmo}</div>
+        </div>
+        <button class="chip" type="button" data-act="add" aria-label="Anotar gasto de ${c[2]}">+</button>
+      </li>`;
+    }).join("");
+    $("#noTopes").classList.toggle("hidden", topes.length > 0);
+    $("#addTopeBtn").classList.toggle("hidden", topes.length >= CATS_TOPE().length);
   }
 
   function renderDeudas() {
@@ -1526,6 +1606,21 @@
       });
     }
 
+    // Topes vs. usado (pagado + pendiente, igual que la barra de la quincena)
+    const conTopes = rows.some((x) => x.r.topes.length);
+    $("#topesCard").classList.toggle("hidden", !conTopes);
+    if (conTopes) {
+      barChart($("#chartTopes"), {
+        labels: rows.map((x) => shortDate(x.p.fecha)),
+        series: [
+          { name: "Topes", color: "--series-1", values: rows.map((x) => round2(sum(x.r.topes, (t) => t.tope))) },
+          { name: "Usado", color: "--series-2", values: rows.map((x) => round2(sum(x.r.topes, (t) => t.usado))) },
+        ],
+        tipExtra: (i) => rows[i].r.topes.map((t) => { const c = catInfo(t.cat);
+          return `<div class="muted">${c[1]} ${c[2]} <b class="${t.queda < 0 ? "neg" : ""}">${fmt(t.usado)}</b> / ${fmt(t.tope)}</div>`; }).join(""),
+      });
+    }
+
     const ids = new Set(ps.map((p) => p.id));
     const gs = S.gastos.filter((g) => ids.has(g.periodo_id) && +g.monto > 0);
     const porCat = {};
@@ -1541,12 +1636,13 @@
 
     $("#historyList").innerHTML = [...rows].reverse().map(({ p, r }) => {
       const pct = r.ingresos > 0 ? Math.min(100, (r.pagado / r.ingresos) * 100) : 0;
+      const tTope = round2(sum(r.topes, (t) => t.tope)), tUsado = round2(sum(r.topes, (t) => t.usado));
       return `
       <li class="item hist" data-id="${p.id}">
         <div class="body">
           <div class="hero-row"><span class="desc">${esc(p.nombre)}</span><b class="${r.balance < 0 ? "neg" : "pos"}">${fmt(r.balance)}</b></div>
           <div class="bar"><div style="width:${pct}%"></div></div>
-          <div class="nums"><span>Ingresos ${fmt(r.ingresos)}</span><span>Pagado ${fmt(r.pagado)}</span><span>${r.nPagados}/${r.gs.length} gastos</span></div>
+          <div class="nums"><span>Ingresos ${fmt(r.ingresos)}</span><span>Pagado ${fmt(r.pagado)}</span><span>${r.nPagados}/${r.gs.length} gastos</span>${r.topes.length ? `<span class="${tUsado > tTope + 0.005 ? "neg" : ""}">Topes: ${fmt(tUsado)} / ${fmt(tTope)}</span>` : ""}</div>
         </div>
       </li>`;
     }).join("");
@@ -1628,6 +1724,9 @@
     (m === menu ? userMenu : menu).classList.add("hidden");
     m.classList.toggle("hidden");
   }
+  $("#alerts").addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches(".alert[data-action]")) { e.preventDefault(); e.target.click(); }
+  });
   $("#periodMenuBtn").addEventListener("click", (e) => toggleMenu(menu, e));
   $("#userBtn").addEventListener("click", (e) => toggleMenu(userMenu, e));
   document.addEventListener("click", (e) => {
@@ -1642,6 +1741,10 @@
     if (a.dataset.action === "edit-period") openPeriod(current());
     if (a.dataset.action === "mark-all") markAllPaid();
     if (a.dataset.action === "new-meta") openMeta();
+    if (a.dataset.action === "ir-en-curso") {
+      const q = quincenaEnCurso();
+      if (q) { S.currentId = q.id; renderPeriodSelect(); renderPeriodo(); window.scrollTo({ top: 0 }); }
+    }
     if (a.dataset.action === "add-aporte") {
       const m = byId("metas", a.dataset.meta);
       if (!m || !current()) return;
@@ -1677,7 +1780,8 @@
   let editingGastoId = null;
   gastoForm.categoria.innerHTML = `<option value="">— Sin categoría —</option>` + CATS.map(([k, i, l]) => `<option value="${k}">${i} ${l}</option>`).join("");
 
-  function openGasto(g = null) {
+  // preset: valores para un gasto nuevo, p. ej. { categoria: "ocio", pagado: true } desde un tope
+  function openGasto(g = null, preset = {}) {
     editingGastoId = g?.id ?? null;
     $("#gastoTitle").textContent = g ? "Editar gasto" : "Nuevo gasto";
     $("#gastoDelete").classList.toggle("hidden", !g);
@@ -1688,10 +1792,10 @@
     gastoForm.descripcion.value = g?.descripcion ?? "";
     gastoForm.monto.value = g ? +g.monto : "";
     gastoForm.vence.value = g?.vence ?? "";
-    gastoForm.categoria.value = g?.categoria ?? "";
+    gastoForm.categoria.value = g?.categoria ?? preset.categoria ?? "";
     gastoForm.vinculo.value = g?.deuda_id ? "d:" + g.deuda_id : g?.meta_id ? "m:" + g.meta_id : g?.prestamo_id ? "p:" + g.prestamo_id : "";
     gastoForm.repetir.value = !g?.fijo ? "no" : g.frecuencia === "mensual" ? "mensual" : "quincenal";
-    gastoForm.pagado.checked = g?.pagado ?? false;
+    gastoForm.pagado.checked = g?.pagado ?? preset.pagado ?? false;
     gastoDialog.showModal();
     if (!g) gastoForm.descripcion.focus();
   }
@@ -1799,6 +1903,53 @@
     ingresoDialog.close(); render();
   });
 
+  // ---------- Topes por categoría ----------
+  // Se guardan en la quincena: periodos.topes = { ocio: 80, comida: 120 }
+  const topeDialog = $("#topeDialog");
+  const topeForm = $("#topeForm");
+  let editingTopeCat = null;
+  function openTope(cat = null, sugerida = null) {
+    const p = current();
+    if (!p) return;
+    const usadas = Object.keys(p.topes ?? {});
+    const libres = CATS_TOPE().filter(([k]) => k === cat || !usadas.includes(k));
+    if (!libres.length) return toast("Todas las categorías ya tienen tope");
+    editingTopeCat = cat;
+    $("#topeTitle").textContent = cat ? `Tope de ${catInfo(cat)[2]}` : "Nuevo tope";
+    $("#topeDelete").classList.toggle("hidden", !cat);
+    topeForm.categoria.innerHTML = libres.map(([k, i, l]) => `<option value="${k}">${i} ${l}</option>`).join("");
+    topeForm.categoria.value = cat ?? (libres.some(([k]) => k === sugerida) ? sugerida : libres[0][0]);
+    topeForm.categoria.disabled = !!cat;
+    topeForm.monto.value = cat ? +p.topes[cat] : "";
+    topeDialog.showModal();
+    topeForm.monto.focus();
+  }
+  $("#addTopeBtn").addEventListener("click", () => openTope());
+  $("#topeInvite").addEventListener("click", () => openTope(null, "ocio"));
+  $("#topeList").addEventListener("click", (e) => {
+    const li = e.target.closest("[data-cat]");
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!li || !act) return;
+    if (act === "edit") return openTope(li.dataset.cat);
+    if (act === "add") openGasto(null, { categoria: li.dataset.cat, pagado: true });
+  });
+  topeForm.addEventListener("submit", (e) => {
+    if (e.submitter?.value !== "ok") return;
+    const p = current();
+    const monto = parseNum(topeForm.monto.value);
+    if (monto == null || Number.isNaN(monto) || monto <= 0) { e.preventDefault(); toast("Pon un monto mayor que $0"); return; }
+    const cat = editingTopeCat ?? topeForm.categoria.value;
+    db.update("periodos", p.id, { topes: { ...(p.topes ?? {}), [cat]: round2(monto) } });
+    render();
+  });
+  $("#topeDelete").addEventListener("click", () => {
+    const p = current(), cat = editingTopeCat;
+    if (!p || !cat || !confirm(`¿Quitar el tope de ${catInfo(cat)[2]}? Los gastos se conservan.`)) return;
+    const { [cat]: _, ...resto } = p.topes ?? {};
+    db.update("periodos", p.id, { topes: resto });
+    topeDialog.close(); render();
+  });
+
   // ---------- Quincenas ----------
   const periodDialog = $("#periodDialog");
   const periodForm = $("#periodForm");
@@ -1810,12 +1961,9 @@
     if (!last) {
       const t = new Date();
       d = t.getDate() <= 15 ? new Date(t.getFullYear(), t.getMonth(), 15) : new Date(t.getFullYear(), t.getMonth(), 30);
-    } else {
-      const [y, m, day] = last.fecha.split("-").map(Number);
-      d = day < 20 ? new Date(y, m - 1, 30) : new Date(y, m, 15);
-    }
-    // Ajuste para febrero (o meses sin día 30)
-    if (d.getDate() !== 15 && d.getDate() !== 30) d = new Date(d.getFullYear(), d.getMonth(), 0);
+      // Ajuste para febrero (o meses sin día 30)
+      if (d.getDate() !== 15 && d.getDate() !== 30) d = new Date(d.getFullYear(), d.getMonth(), 0);
+    } else d = parseISO(finQuincena(last.fecha));
     return { fecha: iso(d), nombre: `${d.getDate()} de ${MESES[d.getMonth()]}` };
   }
 
@@ -1872,7 +2020,10 @@
       const src = current();
       const modo = periodForm.copiar.value;
       const copyFrom = gastosACopiar(src, row.fecha, modo);
-      const ins = db.insert("periodos", row);
+      // Los topes vienen de la quincena en curso (o de la última que ya empezó); lo que sobró no pasa
+      const hoy = iso(today());
+      const fuenteTopes = quincenaEnCurso() ?? S.periodos.find((x) => x.fecha <= hoy);
+      const ins = db.insert("periodos", { ...row, topes: { ...(fuenteTopes?.topes ?? {}) } });
       if (copyFrom.length) {
         db.insert("gastos", copyFrom.map(({ g, from }, i) => ({
           periodo_id: ins.id, descripcion: g.descripcion, monto: g.monto,
